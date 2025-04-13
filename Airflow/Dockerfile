@@ -26,7 +26,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get update && apt-get install -y google-chrome-stable \
     && rm -rf /var/lib/apt/lists/*
 
-RUN mkdir -p /opt/airflow/chroma_db && chown -R airflow:root /opt/airflow/chroma_db
+# RUN mkdir -p /opt/airflow/chroma_db && chown -R airflow:root /opt/airflow/chroma_db
 
 USER airflow
 

@@ -52,6 +52,7 @@ dependencies = [
     "streamlit-folium (>=0.24.0,<0.25.0)",
     "folium (>=0.19.5,<0.20.0)",
     "transformers (==4.21.1)",
+    "langsmith (>=0.3.30,<0.4.0)",
 ]
 
 
