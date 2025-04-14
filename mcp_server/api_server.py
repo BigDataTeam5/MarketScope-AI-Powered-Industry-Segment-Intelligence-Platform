@@ -50,8 +50,23 @@ async def process_query(query: str, session_id: str, direct: bool = False):
             result = await agent_service.process_query(query)
             print(f"Raw agent result: {result}")
             
-            # Try to extract the text content directly
-            formatted_result = result
+            # Check if the result is already a string (error message)
+            if isinstance(result, str):
+                formatted_result = result
+            elif isinstance(result, dict):
+                # Try to extract the text content from the agent result dict
+                if "output" in result:
+                    formatted_result = result["output"]
+                elif "answer" in result:
+                    formatted_result = result["answer"]
+                elif "content" in result:
+                    formatted_result = result["content"]
+                else:
+                    # If no recognizable format, use the whole result
+                    formatted_result = str(result)
+            else:
+                # Default fallback
+                formatted_result = str(result)
         
         # Store successful result with simplified format
         response_store[session_id] = {

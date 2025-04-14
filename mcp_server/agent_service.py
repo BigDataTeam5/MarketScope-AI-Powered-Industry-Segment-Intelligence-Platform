@@ -31,49 +31,59 @@ class AgentService:
         model = ChatOpenAI(model="gpt-4o", temperature=0)
         
         # Connect to running SSE server
-        client = sse_client(self.server_url)
-        read_stream, write_stream = await client.__aenter__()
-        
         try:
-            session = ClientSession(read_stream, write_stream)
-            await session.__aenter__()
+            client = sse_client(self.server_url)
+            read_stream, write_stream = await client.__aenter__()
             
             try:
-                # Initialize the session
-                await session.initialize()
+                session = ClientSession(read_stream, write_stream)
+                await session.__aenter__()
                 
-                # Load tools from the MCP server
-                tools = await load_mcp_tools(session)
-                print(f"Loaded tools: {[tool.name for tool in tools]}")
+                try:
+                    # Initialize the session
+                    await session.initialize()
+                    
+                    # Load tools from the MCP server
+                    tools = await load_mcp_tools(session)
+                    print(f"Loaded tools: {[tool.name for tool in tools]}")
 
-                # Get the system message
-                system_message = """You are an AI assistant specializing in pharmaceutical and healthcare market segmentation.
+                    # Get the system message
+                    system_message = """You are an AI assistant specializing in pharmaceutical and healthcare market segmentation.
 
-                You have access to tools that can search a knowledge base containing marketing textbooks and industry reports.
+                    You have access to tools that can search a knowledge base containing marketing textbooks and industry reports.
 
-                Follow these steps when answering questions:
-                1. First use pinecone_search to find relevant chunks
-                2. For each chunk_id returned, use fetch_s3_chunk to retrieve the content
-                3. Review all retrieved content before formulating your answer
-                4. If the tools return errors or no useful information, rely on your general knowledge but mention the limitations
+                    Follow these steps when answering questions:
+                    1. First use pinecone_search to find relevant chunks
+                    2. For each chunk_id returned, use fetch_s3_chunk to retrieve the content
+                    3. Review all retrieved content before formulating your answer
+                    4. If the tools return errors or no useful information, rely on your general knowledge but mention the limitations
 
-                Always cite specific information from the retrieved chunks when possible."""
+                    Always cite specific information from the retrieved chunks when possible."""
 
-                # Create agent without using system_message parameter
-                agent = create_react_agent(model, tools)
+                    # Create agent without using system_message parameter
+                    agent = create_react_agent(model, tools)
 
-                # Execute query with system message in the messages list
-                response = await agent.ainvoke({
-                    "messages": [
-                        {"role": "system", "content": system_message},
-                        {"role": "user", "content": query}
-                    ]
-                })
-                return response
+                    # Execute query with system message in the messages list
+                    response = await agent.ainvoke({
+                        "messages": [
+                            {"role": "system", "content": system_message},
+                            {"role": "user", "content": query}
+                        ]
+                    })
+                    return response
+                except Exception as e:
+                    print(f"Error in agent execution: {str(e)}")
+                    return f"An error occurred while processing your query: {str(e)}. Please make sure the Pinecone S3 server is running with 'python mcp_server/pinecone_s3_server.py'."
+                finally:
+                    await session.__aexit__(None, None, None)
+            except Exception as e:
+                print(f"Error in MCP session: {str(e)}")
+                return f"Could not connect to the MCP session: {str(e)}. Please make sure the Pinecone S3 server is running with 'python mcp_server/pinecone_s3_server.py'."
             finally:
-                await session.__aexit__(None, None, None)
-        finally:
-            await client.__aexit__(None, None, None)
+                await client.__aexit__(None, None, None)
+        except Exception as e:
+            print(f"Error connecting to MCP server: {str(e)}")
+            return f"Could not connect to the MCP server at {self.server_url}: {str(e)}. Please make sure the Pinecone S3 server is running with 'python mcp_server/pinecone_s3_server.py'."
     
     @traceable(name="direct_openai_query", run_type="llm")
     async def direct_openai_query(self, query: str):

@@ -1,16 +1,16 @@
 import os
+import boto3
 from mcp.server.fastmcp import FastMCP
 from dotenv import load_dotenv
 from openai import OpenAI
 
 from config import (
     OPENAI_API_KEY, PINECONE_API_KEY, PINECONE_ENV, PINECONE_INDEX_NAME,
-    S3_BUCKET_NAME, S3_CHUNKS_PATH, S3_CHUNKS_FILE,
-    AWS_SERVER_PUBLIC_KEY, AWS_SERVER_SECRET_KEY, AWS_REGION,
     setup_langsmith
 )
 setup_langsmith()
 from langsmith import traceable
+
 # Create MCP server instance
 mcp = FastMCP("PineconeS3")
 
@@ -35,41 +35,53 @@ def pinecone_search(query: str, top_k: int = 3):
         # Initialize Pinecone with the updated API
         pc = Pinecone(api_key=PINECONE_API_KEY)
         
-        # Get the index (assuming it already exists)
-        index = pc.Index(PINECONE_INDEX_NAME)
+        # Print debug info
+        print(f"Searching Pinecone index: {PINECONE_INDEX_NAME} in environment: {PINECONE_ENV}")
         
-        # Generate embedding
-        response = openai_client.embeddings.create(
-            model="text-embedding-ada-002",
-            input=query
-        )
-        vector = response.data[0].embedding
-        
-        # Search Pinecone - use the "book-kotler" namespace
-        results = index.query(
-            vector=vector,
-            top_k=top_k,
-            include_metadata=True,
-            namespace="book-kotler"  # Match the namespace from your screenshot
-        )
-        
-        # Update state
-        rag_state["last_query"] = query
-        rag_state["retrieved_chunks"] = []
-        
-        # Get matches and their scores
-        matches = []
-        for match in results.matches:
-            # Extract the actual ID from the metadata (which matches your S3 chunks)
-            chunk_id = match.id  # This should be something like "kotler_chunk_0"
-            score = match.score
-            matches.append(f"{chunk_id} (score: {score:.4f})")
+        try:
+            # Get the index (assuming it already exists)
+            index = pc.Index(PINECONE_INDEX_NAME)
             
-        # Print debug info about what we found
-        print(f"Found {len(results.matches)} matches: {matches}")
+            # Generate embedding
+            response = openai_client.embeddings.create(
+                model="text-embedding-ada-002",
+                input=query
+            )
+            vector = response.data[0].embedding
+            
+            # Search Pinecone - use the "book-kotler" namespace
+            results = index.query(
+                vector=vector,
+                top_k=top_k,
+                include_metadata=True,
+                namespace="book-kotler"  # Match the namespace from your screenshot
+            )
+            
+            # Update state
+            rag_state["last_query"] = query
+            rag_state["retrieved_chunks"] = []
+            
+            # Get matches and their scores
+            matches = []
+            for match in results.matches:
+                # Extract the actual ID from the metadata (which matches your S3 chunks)
+                chunk_id = match.id  # This should be something like "kotler_chunk_0"
+                score = match.score
+                matches.append(f"{chunk_id} (score: {score:.4f})")
+                
+            # Print debug info about what we found
+            print(f"Found {len(results.matches)} matches: {matches}")
+            
+            # Return chunk IDs directly
+            if not results.matches:
+                return ["No relevant chunks found. Please try a different query."]
+            return [match.id for match in results.matches]
         
-        # Return chunk IDs directly
-        return [match.id for match in results.matches]
+        except Exception as e:
+            error_msg = f"Error querying Pinecone index: {str(e)}"
+            print(error_msg)
+            return [error_msg]
+    
     except Exception as e:
         # Return a clear error message
         error_msg = f"Error in pinecone_search: {str(e)}"
@@ -80,42 +92,37 @@ def pinecone_search(query: str, top_k: int = 3):
 @traceable(name="fetch_s3_chunk", run_type="chain")
 def fetch_s3_chunk(chunk_id: str):
     """Fetch a specific chunk from the S3 chunks file."""
-    import boto3
     import json
+    import boto3
     
     print(f"Fetching chunk: {chunk_id}")
     
-    # Get AWS credentials
-    access_key = os.getenv("AWS_SERVER_PUBLIC_KEY", "")
-    secret_key = os.getenv("AWS_SERVER_SECRET_KEY", "")
-    region = os.getenv("AWS_REGION", "us-east-1")
-    
-    # Initialize S3 client
-    s3_client = boto3.client(
-        's3',
-        aws_access_key_id=access_key,
-        aws_secret_access_key=secret_key,
-        region_name=region
-    )
-    
     try:
-        # Construct object key for the single chunks file
-        object_key = f"{S3_CHUNKS_PATH}{S3_CHUNKS_FILE}"
-        
-        # Get object from S3
-        response = s3_client.get_object(
-            Bucket=S3_BUCKET_NAME,
-            Key=object_key
+        # Initialize S3 client with credentials
+        s3_client = boto3.client(
+            's3',
+            aws_access_key_id=os.getenv('AWS_SERVER_PUBLIC_KEY'),
+            aws_secret_access_key=os.getenv('AWS_SERVER_SECRET_KEY'),
+            region_name=os.getenv('AWS_REGION', 'us-east-2')
         )
         
-        # Parse JSON
-        content = response['Body'].read().decode('utf-8')
-        chunks_data = json.loads(content)
+        # Parse the S3 URL to get bucket and key
+        bucket_name = "finalproject-product"
+        key = "book-content/chunks/S3D7W4_Marketing_Management_chunks.json"
         
-        # Extract the specific chunk - the ID from Pinecone is directly usable
+        print(f"Fetching from S3: bucket={bucket_name}, key={key}")
+        
+        # Get the JSON file from S3
+        response = s3_client.get_object(Bucket=bucket_name, Key=key)
+        chunks_data = json.loads(response['Body'].read().decode('utf-8'))
+        
         if "chunks" in chunks_data and chunk_id in chunks_data["chunks"]:
             chunk = chunks_data["chunks"][chunk_id]
             chunk_text = chunk.get("text", "")
+            
+            # Ensure chunk_text is a string
+            if not isinstance(chunk_text, str):
+                chunk_text = str(chunk_text)
             
             # Add to retrieved chunks
             rag_state["retrieved_chunks"].append({
@@ -123,18 +130,15 @@ def fetch_s3_chunk(chunk_id: str):
                 "content": chunk_text
             })
             
-            # Print preview of the chunk
-            preview = chunk_text[:100] + "..." if len(chunk_text) > 100 else chunk_text
-            print(f"Retrieved chunk {chunk_id}: {preview}")
-            
+            print(f"Successfully retrieved chunk {chunk_id}")
             return chunk_text
         else:
             error_msg = f"Chunk {chunk_id} not found in chunks file."
             print(error_msg)
             return error_msg
-        
+            
     except Exception as e:
-        error_msg = f"Error fetching chunk {chunk_id}: {str(e)}"
+        error_msg = f"Error fetching chunk: {str(e)}"
         print(error_msg)
         return error_msg
     
@@ -142,45 +146,42 @@ def fetch_s3_chunk(chunk_id: str):
 @traceable(name="get_chunks_metadata", run_type="chain")
 def get_chunks_metadata():
     """Get metadata about available chunks."""
-    import boto3
     import json
-    
-    # Get AWS credentials
-    access_key = os.getenv("AWS_SERVER_PUBLIC_KEY", "")
-    secret_key = os.getenv("AWS_SERVER_SECRET_KEY", "")
-    region = os.getenv("AWS_REGION", "us-east-1")
-    
-    # Initialize S3 client
-    s3_client = boto3.client(
-        's3',
-        aws_access_key_id=access_key,
-        aws_secret_access_key=secret_key,
-        region_name=region
-    )
+    import boto3
     
     try:
-        # Construct object key
-        object_key = f"{S3_CHUNKS_PATH}{S3_CHUNKS_FILE}"
-        
-        # Get object from S3
-        response = s3_client.get_object(
-            Bucket=S3_BUCKET_NAME,
-            Key=object_key
+        # Initialize S3 client with credentials
+        s3_client = boto3.client(
+            's3',
+            aws_access_key_id=os.getenv('AWS_SERVER_PUBLIC_KEY'),
+            aws_secret_access_key=os.getenv('AWS_SERVER_SECRET_KEY'),
+            region_name=os.getenv('AWS_REGION', 'us-east-2')
         )
         
-        # Parse JSON
-        content = response['Body'].read().decode('utf-8')
-        chunks_data = json.loads(content)
+        # Use the same bucket and key as fetch_s3_chunk
+        bucket_name = "finalproject-product"
+        key = "book-content/chunks/S3D7W4_Marketing_Management_chunks.json"
         
-        return {
+        print(f"Fetching metadata from S3: bucket={bucket_name}, key={key}")
+        
+        # Get the JSON file from S3
+        response = s3_client.get_object(Bucket=bucket_name, Key=key)
+        chunks_data = json.loads(response['Body'].read().decode('utf-8'))
+        
+        metadata = {
             "book_name": chunks_data.get("book_name", "Unknown"),
             "total_chunks": chunks_data.get("total_chunks", 0),
             "created_at": chunks_data.get("created_at", "Unknown"),
             "chunk_ids": list(chunks_data.get("chunks", {}).keys())
         }
         
+        print(f"Successfully retrieved metadata with {metadata['total_chunks']} chunks")
+        return metadata
+        
     except Exception as e:
-        return f"Error retrieving chunks metadata: {str(e)}"
+        error_msg = f"Error retrieving chunks metadata: {str(e)}"
+        print(error_msg)
+        return error_msg
 
 @mcp.tool()
 @traceable(name="get_all_retrieved_chunks", run_type="chain")
