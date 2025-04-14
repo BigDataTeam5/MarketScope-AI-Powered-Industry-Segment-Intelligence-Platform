@@ -1,0 +1,6 @@
+streamlit_shadcn_ui
+streamlit
+openai
+pinecone
+boto3
+
