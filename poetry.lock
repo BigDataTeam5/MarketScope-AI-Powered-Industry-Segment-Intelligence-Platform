@@ -2659,6 +2659,22 @@ groq = ">=0.4.1,<1"
 langchain-core = ">=0.3.49,<1.0.0"
 
 [[package]]
+name = "langchain-mcp-adapters"
+version = "0.0.7"
+description = "Make Anthropic Model Context Protocol (MCP) tools compatible with LangChain and LangGraph agents."
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = [
+    {file = "langchain_mcp_adapters-0.0.7-py3-none-any.whl", hash = "sha256:1e37ec79fc6afb58d1dea17733e08cc111ebc1992aed4b22c67de5e2bdcdb5c6"},
+    {file = "langchain_mcp_adapters-0.0.7.tar.gz", hash = "sha256:00cae7c832c1cf9e1faa8ed87973af2aa19d411aaf942860de680bec0f659fed"},
+]
+
+[package.dependencies]
+langchain-core = ">=0.3.36,<0.4"
+mcp = ">=1.4.1,<1.7"
+
+[[package]]
 name = "langchain-openai"
 version = "0.3.12"
 description = "An integration package connecting OpenAI and LangChain"
@@ -2978,6 +2994,33 @@ files = [
 
 [package.dependencies]
 traitlets = "*"
+
+[[package]]
+name = "mcp"
+version = "1.6.0"
+description = "Model Context Protocol SDK"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = [
+    {file = "mcp-1.6.0-py3-none-any.whl", hash = "sha256:7bd24c6ea042dbec44c754f100984d186620d8b841ec30f1b19eda9b93a634d0"},
+    {file = "mcp-1.6.0.tar.gz", hash = "sha256:d9324876de2c5637369f43161cd71eebfd803df5a95e46225cab8d280e366723"},
+]
+
+[package.dependencies]
+anyio = ">=4.5"
+httpx = ">=0.27"
+httpx-sse = ">=0.4"
+pydantic = ">=2.7.2,<3.0.0"
+pydantic-settings = ">=2.5.2"
+sse-starlette = ">=1.6.1"
+starlette = ">=0.27"
+uvicorn = ">=0.23.1"
+
+[package.extras]
+cli = ["python-dotenv (>=1.0.0)", "typer (>=0.12.4)"]
+rich = ["rich (>=13.9.4)"]
+ws = ["websockets (>=15.0.1)"]
 
 [[package]]
 name = "mistralai"
@@ -5590,6 +5633,26 @@ pymysql = ["pymysql"]
 sqlcipher = ["sqlcipher3_binary"]
 
 [[package]]
+name = "sse-starlette"
+version = "2.2.1"
+description = "SSE plugin for Starlette"
+optional = false
+python-versions = ">=3.9"
+groups = ["main"]
+files = [
+    {file = "sse_starlette-2.2.1-py3-none-any.whl", hash = "sha256:6410a3d3ba0c89e7675d4c273a301d64649c03a5ef1ca101f10b47f895fd0e99"},
+    {file = "sse_starlette-2.2.1.tar.gz", hash = "sha256:54470d5f19274aeed6b2d473430b08b4b379ea851d953b11d7f1c4a2c118b419"},
+]
+
+[package.dependencies]
+anyio = ">=4.7.0"
+starlette = ">=0.41.3"
+
+[package.extras]
+examples = ["fastapi"]
+uvicorn = ["uvicorn (>=0.34.0)"]
+
+[[package]]
 name = "stack-data"
 version = "0.6.3"
 description = "Extract data from python stack frames and tracebacks for informative displays"
@@ -6662,4 +6725,4 @@ cffi = ["cffi (>=1.11)"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "ce19683d56473325667472c78bea35b263f350aa6b471f32f7ed0e70fee0e227"
+content-hash = "cdf5114e29fb9a8051a85711a7314f82bd67481779da628f54a1da786f542d12"

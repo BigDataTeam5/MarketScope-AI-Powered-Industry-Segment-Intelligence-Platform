@@ -53,6 +53,7 @@ dependencies = [
     "folium (>=0.19.5,<0.20.0)",
     "transformers (==4.21.1)",
     "langsmith (>=0.3.30,<0.4.0)",
+    "langchain-mcp-adapters (>=0.0.7,<0.0.8)",
 ]
 
 
