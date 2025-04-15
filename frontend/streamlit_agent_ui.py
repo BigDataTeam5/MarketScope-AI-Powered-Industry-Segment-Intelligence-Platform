@@ -279,9 +279,28 @@ if submit_btn and query:
     st.session_state.query_in_progress = False
     st.rerun()
 
+
+def shadcn_chart_demo():
+    df = pd.DataFrame({
+        "category": ["A", "B", "C", "D"],
+        "value": [10, 30, 20, 40]
+    })
+    chart = alt.Chart(df).mark_bar().encode(
+        x="category",
+        y="value",
+        tooltip=["category", "value"]
+    )
+
+    # Convert to raw HTML
+    chart_html = chart.to_html()
+
+    # Wrap it in a ShadCN card, then add the raw HTML inside
+    with ui.card(title="Altair Chart via HTML"):
+        ui.html(chart_html)  # or ui.component(html=chart_html)
+
 # System information with tabs 
 st.markdown("---")
-tab1, tab2 = st.tabs(["System Architecture", "System Health"])
+tab1, tab2, tab3 = st.tabs(["System Architecture", "System Health", "ShadCN Charts Demo"])
 
 with tab1:
     st.markdown("### To run this application:")
@@ -312,3 +331,77 @@ with tab2:
                 st.error(f"API Connection: {response.status_code}")
         except Exception as e:
             st.error(f"API Connection Error: {str(e)}")
+
+with tab3:
+    st.markdown("## ShadCN Charts & UI Demo")
+
+    import pandas as pd
+    import altair as alt
+
+    ############################################################################
+    # 1) Line Chart Example
+    ############################################################################
+    # Create a small time-series dataset (Month vs Sales)
+    df_line = pd.DataFrame({
+        "month": pd.date_range(start="2025-01-01", periods=6, freq="M"),
+        "sales": [20, 35, 30, 50, 45, 60]
+    })
+
+    line_chart = alt.Chart(df_line).mark_line(point=True).encode(
+        x=alt.X("month:T", title="Month"),
+        y=alt.Y("sales:Q", title="Sales"),
+        tooltip=["month:T", "sales:Q"]
+    ).properties(
+        width=500,
+        height=300,
+        title="Monthly Sales (Line Chart)"
+    )
+
+    st.markdown("### Line Chart Demo")
+
+    if SHADCN_AVAILABLE:
+        try:
+            with ui.card(title="Line Chart in ShadCN Card"):
+                st.altair_chart(line_chart, use_container_width=True)
+        except Exception as e:
+            st.error(f"ShadCN line chart failed: {str(e)}")
+            st.altair_chart(line_chart, use_container_width=True)
+    else:
+        st.markdown("ShadCN not available, falling back to standard Streamlit chart:")
+        st.altair_chart(line_chart, use_container_width=True)
+
+    st.markdown("---")
+
+    ############################################################################
+    # 2) Scatter Plot Example
+    ############################################################################
+    # Create a sample scatter dataset
+    df_scatter = pd.DataFrame({
+        "product": ["A", "A", "A", "B", "B", "B", "C", "C", "C"],
+        "marketing_spend": [10, 15, 20, 12, 18, 25, 14, 20, 30],
+        "sales": [40, 55, 65, 50, 65, 80, 60, 75, 95]
+    })
+
+    scatter_chart = alt.Chart(df_scatter).mark_circle(size=60).encode(
+        x=alt.X("marketing_spend:Q", title="Marketing Spend (k$)"),
+        y=alt.Y("sales:Q", title="Sales (k$)"),
+        color="product:N",
+        tooltip=["product:N", "marketing_spend:Q", "sales:Q"]
+    ).properties(
+        width=500,
+        height=300,
+        title="Marketing Spend vs Sales (Scatter Plot)"
+    )
+
+    st.markdown("### Scatter Plot Demo")
+
+    if SHADCN_AVAILABLE:
+        try:
+            with ui.card(title="Scatter Plot in ShadCN Card"):
+                st.altair_chart(scatter_chart, use_container_width=True)
+        except Exception as e:
+            st.error(f"ShadCN scatter plot failed: {str(e)}")
+            st.altair_chart(scatter_chart, use_container_width=True)
+    else:
+        st.markdown("ShadCN not available, falling back to standard Streamlit chart:")
+        st.altair_chart(scatter_chart, use_container_width=True)

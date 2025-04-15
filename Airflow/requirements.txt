@@ -11,3 +11,5 @@ apache-airflow-providers-amazon
 mistralai>=1.5.1,<2.0.0
 sentence-transformers
 PyPDF2
+FlagEmbedding
+torch==2.6.0

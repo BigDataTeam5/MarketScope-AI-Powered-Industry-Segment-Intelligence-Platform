@@ -54,89 +54,93 @@ INDUSTRY_SEGMENTS = [
     # Add other industries as needed
 ]
 
-def extract_path_components(s3_key: str) -> Dict[str, str]:
+def extract_path_components(s3_key: str) -> Optional[Dict[str, str]]:
     """
-    Extract industry, segment, company, and filename from S3 key.
-    
-    Expected format: industry/segment/company/filename.pdf
+    Extract industry, segment, (optionally company), and filename from S3 key.
+    We handle both:
+      3-part: industry/segment/filename.pdf
+      4-part: industry/segment/company/filename.pdf
     """
-    components = s3_key.split('/')
-    
-    if len(components) < 4 or not components[-1].lower().endswith('.pdf'):
+    parts = s3_key.split('/')
+    # Always ignore anything that isn't a .pdf at the final part
+    if not parts[-1].lower().endswith('.pdf'):
         return None
     
-    return {
-        "industry": components[0],
-        "segment": components[1],
-        "company": components[2],
-        "filename": components[3]
-    }
+    if len(parts) == 3:
+        # e.g. healthcare industry/Diagnostic segment/segmentstudy.pdf
+        return {
+            "industry": parts[0],
+            "segment": parts[1],
+            "company": None,   # No company folder
+            "filename": parts[2]
+        }
+    elif len(parts) == 4:
+        # e.g. healthcare industry/Diagnostic segment/Abbott Laboratories/0001628280.pdf
+        return {
+            "industry": parts[0],
+            "segment": parts[1],
+            "company": parts[2],
+            "filename": parts[3]
+        }
+    else:
+        # If there's more or fewer than 3 or 4 components, we ignore
+        return None
 
 def list_pdfs_in_s3(**context) -> Dict:
-    """
-    Lists all PDFs in the S3 bucket organized by industry/segment/company.
-    """
     logging.info(f"Starting to list PDFs in S3 bucket: {S3_BUCKET}")
-    
-    # Initialize S3 hook
     s3_hook = S3Hook(aws_conn_id=AWS_CONN_ID)
     
-    # Structure to hold our inventory
     inventory = {
         "timestamp": datetime.now().isoformat(),
         "bucket": S3_BUCKET,
         "industries": defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
     }
-    
-    # Track total counts
     total_pdfs = 0
     
-    # Iterate through each industry for more efficient listing
     for industry in INDUSTRY_SEGMENTS:
         logging.info(f"Listing PDFs for industry: {industry}")
         
-        # List all objects with this industry prefix
+        # 1) Remove delimiter
         industry_keys = s3_hook.list_keys(
             bucket_name=S3_BUCKET,
-            prefix=f"{industry}/",
-            delimiter="/"
+            prefix=f"{industry}/"   # no delimiter
         )
         
-        # Process each key to extract components
         for key in industry_keys or []:
-            if not key.lower().endswith('.pdf'):
-                continue
-                
+            # 2) Parse path
             components = extract_path_components(key)
             if not components:
                 continue
-                
-            # Add to our inventory structure
-            inventory["industries"][components["industry"]][components["segment"]][components["company"]].append(components["filename"])
+            
+            # 3) Handle None vs actual company
+            if components["company"] is None:
+                company_key = "__common__"
+            else:
+                company_key = components["company"]
+            
+            # 4) Insert into inventory
+            inventory["industries"][components["industry"]] \
+                     [components["segment"]] \
+                     [company_key].append(components["filename"])
             total_pdfs += 1
             
-            # Log periodically to show progress
-            if total_pdfs % 100 == 0:
+            if total_pdfs % 50 == 0:
                 logging.info(f"Processed {total_pdfs} PDFs so far...")
     
-    # Convert defaultdict to regular dict for JSON serialization
+    # Convert your defaultdict into normal dict
     inventory_dict = {
         "timestamp": inventory["timestamp"],
         "bucket": inventory["bucket"],
         "industries": {}
     }
+    for ind, seg_dict in inventory["industries"].items():
+        inventory_dict["industries"][ind] = {}
+        for seg, comp_dict in seg_dict.items():
+            inventory_dict["industries"][ind][seg] = dict(comp_dict)
     
-    for industry, segments in inventory["industries"].items():
-        inventory_dict["industries"][industry] = {}
-        for segment, companies in segments.items():
-            inventory_dict["industries"][industry][segment] = {}
-            for company, files in companies.items():
-                inventory_dict["industries"][industry][segment][company] = files
-    
-    # Store results in XCom for downstream tasks
+    # XCom push
     context['ti'].xcom_push(key='pdf_inventory', value=inventory_dict)
     context['ti'].xcom_push(key='total_pdfs', value=total_pdfs)
-    
     logging.info(f"Completed PDF inventory: found {total_pdfs} PDFs across {len(inventory_dict['industries'])} industries")
     
     return {
@@ -144,6 +148,7 @@ def list_pdfs_in_s3(**context) -> Dict:
         "total_pdfs": total_pdfs,
         "industries": len(inventory_dict["industries"])
     }
+
 
 def identify_common_reports(**context) -> Dict:
     """
