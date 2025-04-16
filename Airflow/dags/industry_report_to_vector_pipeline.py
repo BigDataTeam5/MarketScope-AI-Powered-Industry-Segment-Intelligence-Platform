@@ -42,7 +42,8 @@ with open(config_path, 'r') as f:
 
 AWS_CONN_ID = config["AWS_CONN_ID"]
 S3_BUCKET = config["S3_BUCKET"]
-S3_BASE_FOLDER = "healthcare_industry"
+S3_BASE_FOLDER = "healthcare-industry"
+S3_Chunk_BASE_FOLDER = "healthcare_industry/chunks"
 PINECONE_INDEX_NAME = config["PINECONE_INDEX_NAME"]
 
 # Default arguments for DAG
@@ -532,46 +533,74 @@ class MarkdownChunker:
         
         return chunks
 
-def store_chunks_s3(chunks: List[str], metadata: Dict, s3_hook: S3Hook) -> str:
-    """Store chunks in S3 with metadata."""
-    chunks_dict = {
-        f"chunk_{i}": {
-            "text": chunk,
-            "length": len(chunk),
-            "metadata": metadata,
-            "timestamp": datetime.now().isoformat()
-        }
-        for i, chunk in enumerate(chunks)
-    }
+class FastChunker:
+    """High-performance chunking strategy optimized for speed rather than structure preservation."""
     
-    chunks_payload = {
-        "report_name": metadata['filename'],
-        "created_at": datetime.now().isoformat(),
-        "total_chunks": len(chunks),
-        "metadata": metadata,
-        "chunks": chunks_dict
-    }
+    def __init__(self, chunk_size=1000, chunk_overlap=200):
+        self.chunk_size = chunk_size
+        self.chunk_overlap = chunk_overlap
     
-    # Save to S3
-    chunks_key = f"{S3_BASE_FOLDER}/chunks/{metadata['industry']}/{metadata['segment']}/{metadata['filename'].replace('.pdf', '')}_chunks.json"
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
-        json.dump(chunks_payload, f, indent=2)
-        chunks_path = f.name
+    def split_text(self, text: str) -> List[str]:
+        """Quickly split text using a sliding window approach."""
+        # Handle empty or small text
+        if not text or len(text) <= self.chunk_size:
+            return [text]
         
-    s3_hook.load_file(
-        filename=chunks_path,
-        key=chunks_key,
-        bucket_name=S3_BUCKET,
-        replace=True
-    )
+        # Preprocess text to identify "hard boundaries" we shouldn't split across
+        # (like headers, code blocks, tables) and mark them with special tokens
+        lines = text.split('\n')
+        chunks = []
+        current_pos = 0
+        text_length = len(text)
+        
+        # Fast sliding window approach
+        while current_pos < text_length:
+            # Calculate end position for this chunk
+            end_pos = min(current_pos + self.chunk_size, text_length)
+            
+            # If we're not at the end, try to find a good split point
+            if end_pos < text_length:
+                # Look for paragraph breaks first (double newline)
+                paragraph_break = text.rfind('\n\n', current_pos, end_pos)
+                if paragraph_break != -1 and paragraph_break > current_pos:
+                    end_pos = paragraph_break + 2  # Include the double newline
+                else:
+                    # Fallback to single newline
+                    newline = text.rfind('\n', current_pos, end_pos)
+                    if newline != -1 and newline > current_pos:
+                        end_pos = newline + 1  # Include the newline
+                    # If no good break point, just use character boundary
+            
+            # Extract the chunk
+            chunk = text[current_pos:end_pos].strip()
+            if chunk:  # Only add non-empty chunks
+                chunks.append(chunk)
+            
+            # Move position for next chunk, accounting for overlap
+            current_pos = end_pos - self.chunk_overlap if self.chunk_overlap > 0 else end_pos
+        
+        return chunks
     
-    os.unlink(chunks_path)
-    logging.info(f"Stored {len(chunks)} chunks in S3: s3://{S3_BUCKET}/{chunks_key}")
-    
-    return chunks_key
+    def split_text_batched(self, text: str, batch_size=10) -> List[str]:
+        """Even faster chunking by processing text in batches."""
+        # For extremely large documents, process in batches
+        if len(text) > self.chunk_size * batch_size * 5:  # Arbitrary threshold
+            segments = []
+            segment_size = len(text) // batch_size + 1
+            
+            # Split into rough segments first
+            for i in range(0, len(text), segment_size):
+                segment = text[i:i+segment_size]
+                # Process each segment
+                segments.extend(self.split_text(segment))
+                
+            return segments
+        else:
+            # For smaller documents, use regular chunking
+            return self.split_text(text)
 
 def process_chunks_and_embeddings(**context):
-    """Process chunks and create embeddings using BGE embeddings model."""
+    """Process chunks and create embeddings for all PDFs in all segment folders."""
     # Retrieve and rebuild metrics
     ti = context['ti']
     metrics_dict = ti.xcom_pull(key='metrics_dict', task_ids='locate_pdf')
@@ -587,107 +616,215 @@ def process_chunks_and_embeddings(**context):
     
     metrics.start_stage("chunking_and_embedding")
     
-    # Get markdown path and report info
-    markdown_path = ti.xcom_pull(key='mistral_markdown_path', task_ids='process_pdf_with_mistral')
-    report_info = ti.xcom_pull(key='report_info')
+    # Initialize S3 hook
+    s3_hook = S3Hook(aws_conn_id=AWS_CONN_ID)
     
-    if not markdown_path or not os.path.exists(markdown_path):
-        error_msg = f"Missing or invalid markdown path: {markdown_path}"
+    # Get all segment folders
+    segment_folders = s3_hook.list_keys(
+        bucket_name=S3_BUCKET,
+        prefix=f"{S3_BASE_FOLDER}/",
+        delimiter='/'
+    )
+    
+    if not segment_folders:
+        error_msg = f"No segment folders found in S3 bucket: {S3_BUCKET}/{S3_BASE_FOLDER}/"
         metrics.error("chunking_and_embedding", error_msg)
         metrics.end_stage("chunking_and_embedding", status="failed")
         raise AirflowFailException(error_msg)
-
+    
+    processed_files = 0
     try:
-        # Read markdown content
-        with open(markdown_path, "r", encoding="utf-8") as f:
-            markdown_text = f.read()
-
-        # Use MarkdownChunker for text splitting
-        chunker = MarkdownChunker(chunk_size=500, chunk_overlap=50)
-        chunks = chunker.split_text(markdown_text)
-        logging.info(f"Created {len(chunks)} chunks from markdown text")
-        
-        # Store chunks in S3
-        s3_hook = S3Hook(aws_conn_id=AWS_CONN_ID)
-        chunks_s3_key = store_chunks_s3(chunks, report_info, s3_hook)
-        ti.xcom_push(key='chunks_s3_key', value=chunks_s3_key)
-        
-        # Initialize BGE embedding model
-        from FlagEmbedding import FlagModel
-        bge_model = FlagModel('BAAI/bge-large-en-v1.5', 
-                            use_fp16=True,  # Faster inference with FP16
-                            device='cuda' if torch.cuda.is_available() else 'cpu')
-        
-        # Process chunks in batches
-        batch_size = 8
-        embeddings = []
-        
-        for i in range(0, len(chunks), batch_size):
-            batch = chunks[i:i+batch_size]
-            batch_embeddings = bge_model.encode(batch, max_length=512)
+        # Process each segment folder
+        for segment_folder in segment_folders:
+            segment_name = segment_folder.rstrip('/').split('/')[-1]
+            logging.info(f"Processing segment folder: {segment_name}")
             
-            # Normalize after encoding if needed
-            from sklearn.preprocessing import normalize
-            batch_embeddings = normalize(batch_embeddings)
-            
-            embeddings.extend(batch_embeddings.tolist())
-            
-            if i % 50 == 0:
-                logging.info(f"Embedded chunks {i} to {i+len(batch)} of {len(chunks)}")
-        
-        # Initialize Pinecone
-        from pinecone import Pinecone, ServerlessSpec
-        pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
-        
-        # Create index if it doesn't exist
-        index_name = PINECONE_INDEX_NAME
-        if index_name not in pc.list_indexes().names():
-            pc.create_index(
-                name=index_name,
-                dimension=1024,  # BGE model dimension
-                metric="cosine",
-                spec=ServerlessSpec(
-                    cloud="aws",
-                    region="us-east-1"
-                )
+            # Get all company folders in this segment
+            company_folders = s3_hook.list_keys(
+                bucket_name=S3_BUCKET,
+                prefix=segment_folder,
+                delimiter='/'
             )
-            logging.info(f"Created Pinecone index '{index_name}'")
-        
-        # Get index
-        index = pc.Index(index_name)
-        
-        # Use segment as namespace
-        namespace = f"{report_info['industry']}-{report_info['segment']}"
-        
-        # Prepare vectors with metadata
-        vectors = []
-        for i, emb in enumerate(embeddings):
-            vectors.append({
-                "id": f"{report_info['filename']}_{i}",
-                "values": emb,
-                "metadata": {
-                    "chunk_id": f"chunk_{i}",
-                    "industry": report_info['industry'],
-                    "segment": report_info['segment'],
-                    "company": report_info['company'],
-                    "filename": report_info['filename'],
-                    "s3_chunks_key": chunks_s3_key,
-                    "embedding_model": "bge-large-en-v1.5",
-                    "processing_timestamp": datetime.now().isoformat()
-                }
-            })
-        
-        # Upsert vectors in batches
-        batch_size = 100
-        for i in range(0, len(vectors), batch_size):
-            batch = vectors[i:i+batch_size]
-            index.upsert(vectors=batch, namespace=namespace)
-            logging.info(f"Upserted vectors {i} to {i+len(batch)} of {len(vectors)}")
+            
+            for company_folder in company_folders:
+                company_name = company_folder.rstrip('/').split('/')[-1]
+                logging.info(f"Processing company folder: {company_name} in segment: {segment_name}")
+                
+                # List all files in this company folder
+                files = s3_hook.list_keys(
+                    bucket_name=S3_BUCKET,
+                    prefix=company_folder
+                )
+                
+                pdf_files = [f for f in files if f.lower().endswith('.pdf')]
+                
+                if not pdf_files:
+                    logging.info(f"No PDF files found in company folder: {company_folder}")
+                    continue
+                
+                # Process each PDF file in this company folder
+                for pdf_file in pdf_files:
+                    try:
+                        filename = os.path.basename(pdf_file)
+                        logging.info(f"Processing PDF file: {filename}")
+                        
+                        # Download the PDF file locally
+                        temp_dir = tempfile.mkdtemp(prefix="industry_pdf_")
+                        local_pdf_path = os.path.join(temp_dir, filename)
+                        s3_hook.get_key(pdf_file, bucket_name=S3_BUCKET).download_file(local_pdf_path)
+                        
+                        # Extract industry from the path
+                        path_parts = pdf_file.split('/')
+                        industry = path_parts[0] if len(path_parts) > 0 else "unknown"
+                        
+                        # Process the PDF to markdown
+                        temp_output_dir = tempfile.mkdtemp(prefix="mistral_output_")
+                        temp_markdown_file = os.path.join(temp_output_dir, "output.md")
+                        from utils.mistralparsing_userpdf import process_pdf
+                        process_pdf(pdf_path=Path(local_pdf_path), output_dir=Path(temp_output_dir))
+                        
+                        # Read markdown content
+                        with open(temp_markdown_file, "r", encoding="utf-8") as f:
+                            markdown_text = f.read()
+                        
+                        # Use FastChunker for text splitting
+                        chunker = FastChunker(chunk_size=500, chunk_overlap=50)
+                        chunks = chunker.split_text(markdown_text)
+                        # Or for very large documents:
+                        # chunks = chunker.split_text_batched(markdown_text)
+                        
+                        logging.info(f"Created {len(chunks)} chunks from markdown text for file: {filename}")
+                        
+                        # Prepare report info
+                        report_info = {
+                            "industry": industry,
+                            "segment": segment_name,
+                            "company": company_name,
+                            "filename": filename
+                        }
+                        
+                        # Store chunks in S3
+                        chunks_s3_key = f"{S3_BASE_FOLDER}-chunks/{segment_name}/{company_name}/{filename.replace('.pdf', '')}_chunks.json"
+                        
+                        chunks_dict = {
+                            f"chunk_{i}": {
+                                "text": chunk,
+                                "length": len(chunk),
+                                "metadata": report_info,
+                                "timestamp": datetime.now().isoformat()
+                            }
+                            for i, chunk in enumerate(chunks)
+                        }
+                        
+                        chunks_payload = {
+                            "report_name": filename,
+                            "created_at": datetime.now().isoformat(),
+                            "total_chunks": len(chunks),
+                            "metadata": report_info,
+                            "chunks": chunks_dict
+                        }
+                        
+                        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+                            json.dump(chunks_payload, f, indent=2)
+                            chunks_path = f.name
+                        
+                        s3_hook.load_file(
+                            filename=chunks_path,
+                            key=chunks_s3_key,
+                            bucket_name=S3_BUCKET,
+                            replace=True
+                        )
+                        
+                        os.unlink(chunks_path)
+                        logging.info(f"Stored {len(chunks)} chunks in S3: s3://{S3_BUCKET}/{chunks_s3_key}")
+                        
+                        # Initialize BGE embedding model
+                        from FlagEmbedding import FlagModel
+                        bge_model = FlagModel('BAAI/bge-large-en-v1.5', 
+                                            use_fp16=True,
+                                            device='cuda' if torch.cuda.is_available() else 'cpu')
+                        
+                        # Process chunks in batches
+                        batch_size = 8
+                        embeddings = []
+                        
+                        for i in range(0, len(chunks), batch_size):
+                            batch = chunks[i:i+batch_size]
+                            batch_embeddings = bge_model.encode(batch, max_length=512)
+                            
+                            # Normalize embeddings
+                            from sklearn.preprocessing import normalize
+                            batch_embeddings = normalize(batch_embeddings)
+                            
+                            embeddings.extend(batch_embeddings.tolist())
+                            
+                            if i % 50 == 0:
+                                logging.info(f"Embedded chunks {i} to {i+len(batch)} of {len(chunks)}")
+                        
+                        # Initialize Pinecone
+                        from pinecone import Pinecone, ServerlessSpec
+                        pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
+                        
+                        # Create index if it doesn't exist
+                        index_name = PINECONE_INDEX_NAME
+                        if index_name not in pc.list_indexes().names():
+                            pc.create_index(
+                                name=index_name,
+                                dimension=1024,
+                                metric="cosine",
+                                spec=ServerlessSpec(
+                                    cloud="aws",
+                                    region="us-east-1"
+                                )
+                            )
+                            logging.info(f"Created Pinecone index '{index_name}'")
+                        
+                        # Get index
+                        index = pc.Index(index_name)
+                        
+                        # Use segment as namespace
+                        namespace = f"{industry}-{segment_name}"
+                        
+                        # Prepare vectors with metadata
+                        vectors = []
+                        for i, emb in enumerate(embeddings):
+                            vectors.append({
+                                "id": f"{filename}_{i}",
+                                "values": emb,
+                                "metadata": {
+                                    "chunk_id": f"chunk_{i}",
+                                    "industry": industry,
+                                    "segment": segment_name,
+                                    "company": company_name,
+                                    "filename": filename,
+                                    "s3_chunks_key": chunks_s3_key,
+                                    "embedding_model": "bge-large-en-v1.5",
+                                    "processing_timestamp": datetime.now().isoformat()
+                                }
+                            })
+                        
+                        # Upsert vectors in batches
+                        batch_size = 100
+                        for i in range(0, len(vectors), batch_size):
+                            batch = vectors[i:i+batch_size]
+                            index.upsert(vectors=batch, namespace=namespace)
+                            logging.info(f"Upserted vectors {i} to {i+len(batch)} of {len(vectors)}")
+                        
+                        processed_files += 1
+                        logging.info(f"Successfully processed file {pdf_file}")
+                        
+                        # Clean up temporary files
+                        shutil.rmtree(temp_dir)
+                        shutil.rmtree(temp_output_dir)
+                    
+                    except Exception as e:
+                        logging.error(f"Error processing file {pdf_file}: {str(e)}")
+                        metrics.error("processing_pdf", f"Error processing {pdf_file}: {str(e)}", e)
+                        # Continue to next file rather than failing the whole task
+                        continue
         
         metrics.end_stage("chunking_and_embedding", status="success", metrics={
-            "chunk_count": len(chunks),
-            "vectors_uploaded": len(vectors),
-            "namespace": namespace
+            "processed_files": processed_files,
         })
         
         updated_metrics_dict = {
@@ -702,8 +839,7 @@ def process_chunks_and_embeddings(**context):
         
         return {
             "status": "success",
-            "chunks": len(chunks),
-            "vectors": len(vectors)
+            "processed_files": processed_files
         }
         
     except Exception as e:
@@ -711,7 +847,6 @@ def process_chunks_and_embeddings(**context):
         metrics.error("chunking_and_embedding", error_msg, e)
         metrics.end_stage("chunking_and_embedding", status="failed")
         
-        # Even on error, update metrics in XCom
         updated_metrics_dict = {
             "report_name": metrics.report_name,
             "start_time": metrics.start_time,

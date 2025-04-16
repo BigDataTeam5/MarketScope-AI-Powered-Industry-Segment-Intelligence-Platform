@@ -551,7 +551,7 @@ with main_tab2:
                 st.markdown("### Market Segment Selection")
 
                 # Show available segments only
-                segments_options = ["SKINCARE", "WEARABLES", "DIAGNOSTICS", "OTC-PHARMACEUTICALS"]
+                segments_options = ["SKINCARE", "WEARABLES", "DIAGNOSTICS", "OTC-PHARMACEUTICALS", "SUPPLEMENTS"]
 
                 # Add information about segments
                 st.info("""
