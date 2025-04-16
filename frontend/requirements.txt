@@ -1,6 +1,10 @@
-streamlit_shadcn_ui
 streamlit
+requests
+python-dotenv
 openai
 pinecone
 boto3
-
+litellm
+pandas
+numpy
+scikit-learn
