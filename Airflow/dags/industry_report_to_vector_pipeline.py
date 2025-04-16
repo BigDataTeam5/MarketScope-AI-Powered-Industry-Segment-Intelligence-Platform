@@ -191,21 +191,29 @@ def locate_pdf(**context) -> str:
     """Locate the PDF file in S3 and download it locally."""
     global metrics
     
-    # Get the report info from DAG run configuration
+    # Get the report info from DAG run configuration or use defaults
     dag_run = context['dag_run']
     if dag_run and dag_run.conf:
         report_info = dag_run.conf.get('report_info')
     else:
-        report_info = None
-
-    # Validate report info
-    if not report_info or not isinstance(report_info, dict):
-        raise AirflowFailException("Report info must be provided in DAG run configuration")
+        # Use default values if no configuration is provided
+        report_info = {
+            "industry": "healthcare-industry",
+            "segment": "otc-pharmaceutical-segment",
+            "company": "perrigo-plc",
+            "filename": "PRGO (Perrigo Company plc)  (10-K) 2025-02-28.pdf"
+        }
+        logging.info(f"Using default report_info: {report_info}")
     
-    required_fields = ['industry', 'segment', 'company', 'filename']
-    missing_fields = [field for field in required_fields if field not in report_info]
-    if missing_fields:
-        raise AirflowFailException(f"Missing required fields in report_info: {', '.join(missing_fields)}")
+    # Validate report info (now optional as we provide defaults)
+    if not report_info or not isinstance(report_info, dict):
+        report_info = {
+            "industry": "healthcare-industry",
+            "segment": "otc-pharmaceutical-segment",
+            "company": "perrigo-plc",
+            "filename": "report.pdf"
+        }
+        logging.info(f"Invalid report_info format, using defaults: {report_info}")
     
     # Store report_info in XCom for other tasks
     context['ti'].xcom_push(key='report_info', value=report_info)
@@ -213,6 +221,15 @@ def locate_pdf(**context) -> str:
     # Initialize metrics for this report
     metrics = ProcessingMetrics(report_info['filename'])
     metrics.start_stage("pdf_location")
+
+    # After initializing metrics
+    metrics_dict = {
+        "report_name": metrics.report_name,
+        "start_time": metrics.start_time,
+        "stages": metrics.stages,
+        # Add other necessary attributes
+    }
+    context['ti'].xcom_push(key='metrics_dict', value=metrics_dict)
 
     # Initialize S3 hook
     s3_hook = S3Hook(aws_conn_id=AWS_CONN_ID)
@@ -236,15 +253,44 @@ def locate_pdf(**context) -> str:
         context['ti'].xcom_push(key='pdf_path', value=local_pdf_path)
         
         metrics.end_stage("pdf_location", status="success")
+        
+        updated_metrics_dict = {
+            "report_name": metrics.report_name,
+            "start_time": metrics.start_time,
+            "stages": metrics.stages,
+            "errors": metrics.errors,
+            "warnings": metrics.warnings,
+            "memory_samples": metrics.memory_samples
+        }
+        context['ti'].xcom_push(key='metrics_dict', value=updated_metrics_dict)
+        
         return local_pdf_path
     else:
         error_msg = f"❌ PDF not found in S3: s3://{S3_BUCKET}/{s3_key}"
         metrics.error("pdf_location", error_msg)
         metrics.end_stage("pdf_location", status="failed")
+        
+        updated_metrics_dict = {
+            "report_name": metrics.report_name,
+            "start_time": metrics.start_time,
+            "stages": metrics.stages,
+            "errors": metrics.errors,
+            "warnings": metrics.warnings,
+            "memory_samples": metrics.memory_samples
+        }
+        context['ti'].xcom_push(key='metrics_dict', value=updated_metrics_dict)
+        
         raise AirflowFailException(error_msg)
 
 def process_pdf_with_mistral(**context) -> dict:
     """Convert PDF to markdown using MistralAI, preserving images and tables."""
+    # Retrieve and rebuild metrics
+    metrics_dict = context['ti'].xcom_pull(key='metrics_dict', task_ids='locate_pdf')
+    metrics = ProcessingMetrics(metrics_dict["report_name"])
+    metrics.start_time = metrics_dict["start_time"]
+    metrics.stages = metrics_dict["stages"]
+    # Restore other attributes
+
     metrics.start_stage("pdf_processing")
     ti = context['ti']
     
@@ -253,46 +299,98 @@ def process_pdf_with_mistral(**context) -> dict:
         error_msg = f"PDF path not found: {pdf_path}"
         metrics.error("pdf_processing", error_msg)
         metrics.end_stage("pdf_processing", status="failed")
+        
+        updated_metrics_dict = {
+            "report_name": metrics.report_name,
+            "start_time": metrics.start_time,
+            "stages": metrics.stages,
+            "errors": metrics.errors,
+            "warnings": metrics.warnings,
+            "memory_samples": metrics.memory_samples
+        }
+        context['ti'].xcom_push(key='metrics_dict', value=updated_metrics_dict)
+        
         raise AirflowFailException(error_msg)
 
-    # Create a temporary file for markdown output
-    temp_markdown_file = tempfile.NamedTemporaryFile(delete=False, suffix='.md', mode='w+', encoding='utf-8')
-    markdown_path = temp_markdown_file.name
-    temp_markdown_file.close()  # Close but don't delete yet
-
+    # Create a temporary directory for markdown output
+    temp_output_dir = tempfile.mkdtemp(prefix="mistral_output_")
+    temp_markdown_file = os.path.join(temp_output_dir, "output.md")
+    
     try:
         from utils.mistralparsing_userpdf import process_pdf
         
         start_time = time.time()
-        process_pdf(
-            pdf_path=Path(pdf_path),
-            output_path=Path(markdown_path)  # Use temporary file path directly
-        )
+        
+        # FIXED: Pass output_dir parameter
+        logging.info(f"Processing {os.path.basename(pdf_path)} ...")
+        process_pdf(pdf_path=Path(pdf_path), output_dir=Path(temp_output_dir))
+        
+        # Check if file was created
+        markdown_path = temp_markdown_file
+        
         duration = time.time() - start_time
         
         if os.path.exists(markdown_path):
             char_count = len(Path(markdown_path).read_text(encoding='utf-8'))
         else:
-            char_count = 0
+            error_msg = f"Markdown file not created at {markdown_path}"
+            metrics.error("pdf_processing", error_msg)
+            metrics.end_stage("pdf_processing", status="failed")
+            
+            updated_metrics_dict = {
+                "report_name": metrics.report_name,
+                "start_time": metrics.start_time,
+                "stages": metrics.stages,
+                "errors": metrics.errors,
+                "warnings": metrics.warnings,
+                "memory_samples": metrics.memory_samples
+            }
+            context['ti'].xcom_push(key='metrics_dict', value=updated_metrics_dict)
+            
+            raise AirflowFailException(error_msg)
         
         logging.info(f"Mistral PDF parse completed: {markdown_path} (chars={char_count})")
         
         # XCom push path for the next step
         ti.xcom_push(key='mistral_markdown_path', value=markdown_path)
+        # Also store the temp directory for cleanup
+        ti.xcom_push(key='temp_output_dir', value=temp_output_dir)
 
         metrics.end_stage("pdf_processing", status="success", metrics={
             "duration": duration,
             "char_count": char_count
         })
+        
+        updated_metrics_dict = {
+            "report_name": metrics.report_name,
+            "start_time": metrics.start_time,
+            "stages": metrics.stages,
+            "errors": metrics.errors,
+            "warnings": metrics.warnings,
+            "memory_samples": metrics.memory_samples
+        }
+        context['ti'].xcom_push(key='metrics_dict', value=updated_metrics_dict)
+        
         return {"markdown_path": markdown_path}
     
     except Exception as e:
         # Clean up temporary file in case of error
-        if os.path.exists(markdown_path):
-            os.unlink(markdown_path)
+        if os.path.exists(temp_output_dir):
+            shutil.rmtree(temp_output_dir)
         error_msg = f"Error in process_pdf_with_mistral: {e}"
         metrics.error("pdf_processing", error_msg, e)
         metrics.end_stage("pdf_processing", status="failed")
+        
+        updated_metrics_dict = {
+            "report_name": metrics.report_name,
+            "start_time": metrics.start_time,
+            "stages": metrics.stages,
+            "errors": metrics.errors,
+            "warnings": metrics.warnings,
+            "memory_samples": metrics.memory_samples
+        }
+        context['ti'].xcom_push(key='metrics_dict', value=updated_metrics_dict)
+        
         raise AirflowFailException(error_msg)
 
 # =====================================================================================
@@ -474,9 +572,21 @@ def store_chunks_s3(chunks: List[str], metadata: Dict, s3_hook: S3Hook) -> str:
 
 def process_chunks_and_embeddings(**context):
     """Process chunks and create embeddings using BGE embeddings model."""
-    metrics.start_stage("chunking_and_embedding")
+    # Retrieve and rebuild metrics
     ti = context['ti']
-
+    metrics_dict = ti.xcom_pull(key='metrics_dict', task_ids='locate_pdf')
+    metrics = ProcessingMetrics(metrics_dict["report_name"])
+    metrics.start_time = metrics_dict["start_time"]
+    metrics.stages = metrics_dict["stages"]
+    if "errors" in metrics_dict:
+        metrics.errors = metrics_dict["errors"]
+    if "warnings" in metrics_dict:
+        metrics.warnings = metrics_dict["warnings"]
+    if "memory_samples" in metrics_dict:
+        metrics.memory_samples = metrics_dict["memory_samples"]
+    
+    metrics.start_stage("chunking_and_embedding")
+    
     # Get markdown path and report info
     markdown_path = ti.xcom_pull(key='mistral_markdown_path', task_ids='process_pdf_with_mistral')
     report_info = ti.xcom_pull(key='report_info')
@@ -514,9 +624,12 @@ def process_chunks_and_embeddings(**context):
         
         for i in range(0, len(chunks), batch_size):
             batch = chunks[i:i+batch_size]
-            batch_embeddings = bge_model.encode(batch, 
-                                             max_length=512,
-                                             normalize_embeddings=True)  # L2 normalization
+            batch_embeddings = bge_model.encode(batch, max_length=512)
+            
+            # Normalize after encoding if needed
+            from sklearn.preprocessing import normalize
+            batch_embeddings = normalize(batch_embeddings)
+            
             embeddings.extend(batch_embeddings.tolist())
             
             if i % 50 == 0:
@@ -577,6 +690,16 @@ def process_chunks_and_embeddings(**context):
             "namespace": namespace
         })
         
+        updated_metrics_dict = {
+            "report_name": metrics.report_name,
+            "start_time": metrics.start_time,
+            "stages": metrics.stages,
+            "errors": metrics.errors,
+            "warnings": metrics.warnings,
+            "memory_samples": metrics.memory_samples
+        }
+        ti.xcom_push(key='metrics_dict', value=updated_metrics_dict)
+        
         return {
             "status": "success",
             "chunks": len(chunks),
@@ -587,6 +710,18 @@ def process_chunks_and_embeddings(**context):
         error_msg = f"Error in process_chunks_and_embeddings: {str(e)}"
         metrics.error("chunking_and_embedding", error_msg, e)
         metrics.end_stage("chunking_and_embedding", status="failed")
+        
+        # Even on error, update metrics in XCom
+        updated_metrics_dict = {
+            "report_name": metrics.report_name,
+            "start_time": metrics.start_time,
+            "stages": metrics.stages,
+            "errors": metrics.errors,
+            "warnings": metrics.warnings,
+            "memory_samples": metrics.memory_samples
+        }
+        ti.xcom_push(key='metrics_dict', value=updated_metrics_dict)
+        
         raise AirflowFailException(error_msg)
 
 # =====================================================================================
@@ -595,6 +730,14 @@ def process_chunks_and_embeddings(**context):
 
 def cleanup_and_report(**context):
     """Clean up temporary files and generate processing report."""
+    # Retrieve and rebuild metrics
+    ti = context['ti']
+    metrics_dict = ti.xcom_pull(key='metrics_dict', task_ids='locate_pdf')
+    metrics = ProcessingMetrics(metrics_dict["report_name"])
+    metrics.start_time = metrics_dict["start_time"]
+    metrics.stages = metrics_dict["stages"]
+    # Restore other necessary attributes
+    
     metrics.start_stage("cleanup")
     
     try:
@@ -604,17 +747,27 @@ def cleanup_and_report(**context):
             shutil.rmtree(temp_dir)
             logging.info(f"Cleaned up temporary directory: {temp_dir}")
             
-        # Clean up temporary markdown file
-        markdown_path = context['ti'].xcom_pull(key='mistral_markdown_path', task_ids='process_pdf_with_mistral')
-        if markdown_path and os.path.exists(markdown_path):
-            os.unlink(markdown_path)
-            logging.info(f"Cleaned up temporary markdown file: {markdown_path}")
+        # Clean up temporary output directory
+        temp_output_dir = context['ti'].xcom_pull(key='temp_output_dir', task_ids='process_pdf_with_mistral')
+        if temp_output_dir and os.path.exists(temp_output_dir):
+            shutil.rmtree(temp_output_dir)
+            logging.info(f"Cleaned up temporary output directory: {temp_output_dir}")
         
         # Generate and save processing report
         s3_hook = S3Hook(aws_conn_id=AWS_CONN_ID)
         report_key = metrics.save_report(s3_hook, "processing_report")
         
         metrics.end_stage("cleanup", status="success")
+        
+        updated_metrics_dict = {
+            "report_name": metrics.report_name,
+            "start_time": metrics.start_time,
+            "stages": metrics.stages,
+            "errors": metrics.errors,
+            "warnings": metrics.warnings,
+            "memory_samples": metrics.memory_samples
+        }
+        context['ti'].xcom_push(key='metrics_dict', value=updated_metrics_dict)
         
         return {
             "status": "success",
@@ -625,6 +778,17 @@ def cleanup_and_report(**context):
         error_msg = f"Error in cleanup_and_report: {str(e)}"
         metrics.error("cleanup", error_msg, e)
         metrics.end_stage("cleanup", status="failed")
+        
+        updated_metrics_dict = {
+            "report_name": metrics.report_name,
+            "start_time": metrics.start_time,
+            "stages": metrics.stages,
+            "errors": metrics.errors,
+            "warnings": metrics.warnings,
+            "memory_samples": metrics.memory_samples
+        }
+        context['ti'].xcom_push(key='metrics_dict', value=updated_metrics_dict)
+        
         raise AirflowFailException(error_msg)
 
 # =====================================================================================
@@ -692,4 +856,4 @@ cleanup_task = PythonOperator(
 )
 
 # Set task dependencies
-locate_pdf_task >> process_pdf_task >> chunking_task >> cleanup_task 
+locate_pdf_task >> process_pdf_task >> chunking_task >> cleanup_task
