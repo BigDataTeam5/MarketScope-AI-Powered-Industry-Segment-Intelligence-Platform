@@ -6827,4 +6827,4 @@ cffi = ["cffi (>=1.11)"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "e2650aff68d88c6659880a93e25b856fb8554cd6fb1a99c2bfc755b0a121d685"
+content-hash = "97332ea36bb8284e55f65b49b9a6cc1c218581a7d1d69fa7ceafddfb8971ca6d"

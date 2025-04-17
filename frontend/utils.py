@@ -87,42 +87,33 @@ def process_query(query: str, agent_type: str, config: Optional[Dict[str, Any]] 
     except requests.exceptions.RequestException as e:
         return f"Error connecting to server: {str(e)}"
 
-def sidebar(PAGES=None):
+def sidebar():
+    """Create sidebar with configuration options"""
     with st.sidebar:
-        st.markdown('<div style="margin-bottom: -15px;"></div>', unsafe_allow_html=True)
-        st.title("🔍 MarketScope AI")
-        st.markdown("## Market Intelligence")
-        st.markdown('<div style="margin-bottom: 20px;"></div>', unsafe_allow_html=True)
-        st.markdown("### Select AI Model")
+        st.title("MarketScope AI")
         
-        # Use Config to get available models
-        models = Config.get_available_models()
-        default_model = Config.DEFAULT_MODEL
-        
-        # Initialize selected_model in session state if not present
-        if "selected_model" not in st.session_state:
-            st.session_state.selected_model = default_model
+        # Initialize session state for segment
+        if "selected_segment" not in st.session_state:
+            st.session_state.selected_segment = None
             
-        # Initialize temperature in session state if not present
-        if "temperature" not in st.session_state:
-            st.session_state.temperature = Config.DEFAULT_TEMPERATURE
+        # Segment selection
+        segments = [
+            "Diagnostic Segment",
+            "Supplement Segment",
+            "Otc Pharmaceutical Segment",
+            "Fitness Wearable Segment",
+            "Skin Care Segment"
+        ]
         
-        st.session_state.selected_model = st.selectbox(
-            "Model",
-            options=models,
-            format_func=lambda x: Config.get_model_config(x)["name"],
-            index=models.index(st.session_state.selected_model) if st.session_state.selected_model in models else 0,
-            label_visibility="collapsed"
+        st.session_state.selected_segment = st.selectbox(
+            "Select Healthcare Segment",
+            options=segments,
+            index=segments.index(st.session_state.selected_segment) if st.session_state.selected_segment else 0
         )
-        st.markdown("### Response Creativity")
-        st.session_state.temperature = st.slider(
-            "Temperature",
-            min_value=0.0,
-            max_value=1.0,
-            value=st.session_state.temperature,
-            step=0.1,
-            label_visibility="collapsed"
-        )
-        st.markdown('<div style="margin-top: 60px;"></div>', unsafe_allow_html=True)
         
-    return None
+        # Display connection status
+        st.markdown("### Connection Status")
+        if check_server_connection():
+            st.success("✅ Server Connected")
+        else:
+            st.error("❌ Server Disconnected")

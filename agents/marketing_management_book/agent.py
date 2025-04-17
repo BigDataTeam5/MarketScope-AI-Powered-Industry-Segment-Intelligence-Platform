@@ -1,93 +1,133 @@
 """
-Marketing Management Agent using LangGraph for healthcare market segmentation.
+Marketing Management Agent using LangChain for healthcare market segmentation
 """
-from typing import Dict, Any, Optional
-import sys
-import os
-from langgraph.prebuilt import create_react_agent
-from mcp import ClientSession
-from mcp.client.sse import sse_client
-from langchain_mcp_adapters.tools import load_mcp_tools
+import logging
+from typing import Dict, Any, Optional, List
+# Fix #1: Update import to use langchain_openai instead of deprecated import
+from langchain_openai import ChatOpenAI
+from langchain.tools import Tool
+from langchain.agents import AgentExecutor, create_react_agent
+from langchain.prompts import ChatPromptTemplate
 from langsmith import traceable
+from config import Config
 
-# Import unified config and services
-from config import Config, litellm_service
-from services.mcp_service import mcp_service
+# Initialize logging
+logger = logging.getLogger('marketing_agent')
 
 class MarketingManagementAgent:
-    """Marketing Management Agent using LangGraph"""
-    
-    def __init__(self, config: Dict[str, Any] = None):
-        self.config = config or {}
-        self.agent = None
+    def __init__(self):
         self.tools = None
+        self.agent = None
+        self.current_segment = None
+        self.llm = None
+
+    def convert_to_langchain_tools(self, tool_functions):
+        """Convert tool functions to LangChain Tool objects"""
+        tools = []
+        for name, func in tool_functions.items():
+            tool = Tool(
+                name=name,
+                func=func,
+                description=func.__doc__ or f"Tool for {name}",
+                return_direct=False
+            )
+            tools.append(tool)
+        return tools
 
     @traceable(name="setup_agent", run_type="chain")
     async def setup(self):
         """Setup agent with tools"""
         try:
-            # Connect to MCP server using the shared service
-            if not await mcp_service.connect():
-                return False
-                
-            # Load tools from MCP server
-            self.tools = await load_mcp_tools(mcp_service.session)
-            print(f"Loaded marketing tools: {[tool.name for tool in self.tools]}")
+            # Load tools
+            from .marketing_tools import tool_functions
             
-            # Create React agent with tools
-            self.agent = create_react_agent(self.tools)
-            return True
+            # Convert to LangChain tools
+            self.tools = self.convert_to_langchain_tools(tool_functions)
+            print(f"Converted {len(self.tools)} tools to LangChain format")
+            
+            # Fix #1: Updated ChatOpenAI import above
+            self.llm = ChatOpenAI(
+                model="gpt-4o",
+                temperature=0.3,
+                api_key=Config.OPENAI_API_KEY
+            )
+            
+            # Create a compliant ReAct prompt template
+            # ReAct requires {tools} and {agent_scratchpad} variables
+            prompt = ChatPromptTemplate.from_template("""You are a healthcare market analyst helping with the {segment} segment.
 
+Available tools:
+{tools}
+
+Use the following format:
+Question: the input question you must answer
+Thought: you should always think about what to do
+Action: the action to take, should be one of [{tool_names}]
+Action Input: the input to the action
+Observation: the result of the action
+... (this Thought/Action/Action Input/Observation can repeat N times)
+Thought: I now know the final answer
+Final Answer: the final answer to the original input question
+
+Question: {input}
+{agent_scratchpad}""")
+            
+            # Create agent
+            agent = create_react_agent(self.llm, self.tools, prompt)
+            
+            # Create executor with appropriate parameters
+            self.agent = AgentExecutor(
+                agent=agent, 
+                tools=self.tools, 
+                verbose=False,
+                handle_parsing_errors=True,
+                max_iterations=3
+            )
+            
+            print("Successfully created LangChain agent with tools")
+            return True
+            
         except Exception as e:
             print(f"Error setting up agent: {str(e)}")
             return False
 
     @traceable(name="process_query", run_type="chain")
-    async def process_query(self, query: str) -> str:
-        """Process query using LangGraph agent"""
+    async def process_query(self, query, segment=None):
+        """Process a query using the agent"""
         try:
-            # Setup agent if not ready
+            if segment:
+                self.current_segment = segment
+            
+            # Initialize if needed
             if not self.agent and not await self.setup():
-                return "Error: Could not initialize marketing agent"
+                return {"error": "Agent initialization failed", "status": "error"}
 
-            # System message for marketing context
-            system_message = """You are an AI assistant specializing in healthcare market segmentation.
+            # Get tool names for the prompt
+            tool_names = ", ".join([tool.name for tool in self.tools])
             
-            You have access to tools that can search Philip Kotler's Marketing Management book and industry reports.
+            # Get tool descriptions for the prompt
+            tool_descriptions = "\n".join([f"{tool.name}: {tool.description}" for tool in self.tools])
             
-            Follow these steps when answering questions:
-            1. Use pinecone_search to find relevant chunks
-            2. For each chunk_id returned, use fetch_s3_chunk to retrieve the content
-            3. Review all retrieved content before formulating your answer
-            4. For segment analysis, use analyze_market_segment tool
-            5. For strategy generation, use generate_segment_strategy tool
-            
-            Always cite specific information from the retrieved chunks when possible."""
+            # Invoke with all required parameters for ReAct
+            response = await self.agent.ainvoke({
+                "input": query,
+                "segment": self.current_segment or "Healthcare",
+                "tool_names": tool_names,
+                "tools": tool_descriptions,
+                "agent_scratchpad": []  # Already fixed to empty list
+            })
 
-            # Get model configuration from settings
-            model_name = self.config.get("model", Config.DEFAULT_MODEL)
-            temperature = self.config.get("temperature", Config.DEFAULT_TEMPERATURE)
-
-            # Use the unified llm_service
-            messages = [
-                {"role": "system", "content": system_message},
-                {"role": "user", "content": query}
-            ]
-            
-            return await litellm_service.chat_completion(
-                messages=messages,
-                model_name=model_name,
-                temperature=temperature
-            )
-
+            return {
+                "output": response.get("output", str(response)),
+                "status": "success",
+                "segment": self.current_segment
+            }
         except Exception as e:
-            return f"Error processing query: {str(e)}"
-        
-    async def cleanup(self):
-        """Cleanup resources"""
-        await mcp_service.cleanup()
-        self.tools = None
-        self.agent = None
+            return {
+                "error": str(e),
+                "status": "error",
+                "segment": self.current_segment
+            }
 
-# Create a singleton instance for easy access
+# Create singleton instance
 marketing_agent = MarketingManagementAgent()

@@ -1,8 +1,7 @@
 """
 Config module initialization
-Exports Config class and litellm_service
+Exports Config class
 """
 from .config import Config
-from .litellm_service import litellm_service
 
-__all__ = ['Config', 'litellm_service']
+__all__ = ['Config']

@@ -6,6 +6,7 @@ import json
 import boto3
 from openai import OpenAI
 from langsmith import traceable
+from typing import Dict, Any, List, Union
 
 # Import consolidated config
 from config.config import Config
@@ -22,10 +23,17 @@ rag_state = {
 }
 
 # Core Search & Retrieval Tools
-@traceable(name="pinecone_search", run_type="chain")
-def pinecone_search(query: str, top_k: int = 3):
+@traceable(name="pinecone_search")
+def pinecone_search(query: str, top_k: int = 3) -> Union[List[str], Dict[str, str]]:
     """Search for relevant chunks in Pinecone using query embeddings."""
     try:
+        # Get embeddings for the query
+        response = openai_client.embeddings.create(
+            model="text-embedding-ada-002",
+            input=[query]
+        )
+        query_embedding = response.data[0].embedding
+        
         # Use updated Pinecone import
         from pinecone import Pinecone
         
@@ -39,16 +47,9 @@ def pinecone_search(query: str, top_k: int = 3):
         # Get the index (assuming it already exists)
         index = pc.Index(index_name)
         
-        # Generate embedding
-        response = openai_client.embeddings.create(
-            model="text-embedding-ada-002",
-            input=query
-        )
-        vector = response.data[0].embedding
-        
         # Search Pinecone - use the "book-kotler" namespace
         results = index.query(
-            vector=vector,
+            vector=query_embedding,
             top_k=top_k,
             include_metadata=True,
             namespace="book-kotler"
@@ -74,13 +75,10 @@ def pinecone_search(query: str, top_k: int = 3):
         return [match.id for match in results.matches]
     
     except Exception as e:
-        # Return a clear error message
-        error_msg = f"Error in pinecone_search: {str(e)}"
-        print(error_msg)
-        return [error_msg]
-    
-@traceable(name="fetch_s3_chunk", run_type="chain")
-def fetch_s3_chunk(chunk_id: str):
+        return {"error": f"Error in pinecone_search: {str(e)}"}
+
+@traceable(name="fetch_s3_chunk")
+def fetch_s3_chunk(chunk_id: str) -> str:
     """Fetch a specific chunk from the S3 chunks file."""
     print(f"Fetching chunk: {chunk_id}")
     
@@ -120,163 +118,78 @@ def fetch_s3_chunk(chunk_id: str):
             print(f"Successfully retrieved chunk {chunk_id}")
             return chunk_text
         else:
-            error_msg = f"Chunk {chunk_id} not found in chunks file."
-            print(error_msg)
-            return error_msg
+            return f"Error fetching chunk {chunk_id}: Chunk not found in chunks file."
             
     except Exception as e:
-        error_msg = f"Error fetching chunk: {str(e)}"
-        print(error_msg)
-        return error_msg
+        return f"Error fetching chunk {chunk_id}: {str(e)}"
 
 # Metadata and Aggregation Tools
-@traceable(name="get_chunks_metadata", run_type="chain")
-def get_chunks_metadata():
+@traceable(name="get_chunks_metadata")
+def get_chunks_metadata() -> Dict[str, Any]:
     """Get metadata about available chunks."""
     try:
-        # Initialize S3 client with credentials
-        s3_client = boto3.client(
-            's3',
-            aws_access_key_id=Config.AWS_SERVER_PUBLIC_KEY,
-            aws_secret_access_key=Config.AWS_SERVER_SECRET_KEY,
-            region_name=Config.AWS_REGION
-        )
-        
-        # Get bucket and key from config
-        bucket_name = Config.BUCKET_NAME
-        key = Config.S3_CHUNKS_PATH + Config.S3_CHUNKS_FILE
-        
-        print(f"Fetching metadata from S3: bucket={bucket_name}, key={key}")
-        
-        # Get the JSON file from S3
-        response = s3_client.get_object(Bucket=bucket_name, Key=key)
-        chunks_data = json.loads(response['Body'].read().decode('utf-8'))
-        
-        metadata = {
-            "book_name": chunks_data.get("book_name", "Unknown"),
-            "total_chunks": chunks_data.get("total_chunks", 0),
-            "created_at": chunks_data.get("created_at", "Unknown"),
-            "chunk_ids": list(chunks_data.get("chunks", {}).keys())
+        return {
+            "retrieved_count": len(rag_state["retrieved_chunks"]),
+            "last_query": rag_state["last_query"],
+            "current_segment": rag_state["current_segment"]
         }
-        
-        print(f"Successfully retrieved metadata with {metadata['total_chunks']} chunks")
-        return metadata
-        
     except Exception as e:
-        error_msg = f"Error retrieving chunks metadata: {str(e)}"
-        print(error_msg)
-        return error_msg
+        return {"error": f"Error getting chunks metadata: {str(e)}"}
 
-@traceable(name="get_all_retrieved_chunks", run_type="chain")
-def get_all_retrieved_chunks():
+@traceable(name="get_all_retrieved_chunks")
+def get_all_retrieved_chunks() -> List[str]:
     """Get all chunks that have been retrieved in this session."""
-    if not rag_state["retrieved_chunks"]:
-        return "No chunks have been retrieved yet."
-    
-    # Format all chunks as a single text
-    chunks_text = "\n\n".join([
-        f"CHUNK {i+1} (ID: {chunk['chunk_id']}):\n{chunk['content']}"
-        for i, chunk in enumerate(rag_state["retrieved_chunks"])
-    ])
-    
-    return chunks_text
+    return rag_state["retrieved_chunks"]
 
 # Marketing Analysis Tools
-@traceable(name="analyze_market_segment", run_type="chain")
-def analyze_market_segment(segment_name: str, market_type: str = "healthcare"):
-    """Analyze a specific market segment using the marketing book knowledge."""
+@traceable(name="analyze_market_segment")
+def analyze_market_segment(segment_name: str, market_type: str = "healthcare") -> Dict[str, Any]:
+    """Retrieve and aggregate relevant content for a market segment (no LLM call)."""
     try:
-        # Update state
         rag_state["current_segment"] = segment_name
-        
-        # First search for relevant chunks about this segment
         search_query = f"marketing segmentation strategy for {segment_name} in {market_type}"
         chunk_ids = pinecone_search(search_query, top_k=5)
         
         if isinstance(chunk_ids, list) and chunk_ids and not chunk_ids[0].startswith("Error"):
-            # Retrieve chunks
             chunk_contents = [fetch_s3_chunk(chunk_id) for chunk_id in chunk_ids]
             chunk_contents = [c for c in chunk_contents if not c.startswith("Error") and not c.startswith("Chunk")]
             
             if chunk_contents:
-                # Generate analysis using OpenAI
-                analysis_prompt = f"""
-                Based on Philip Kotler's Marketing Management principles, analyze the {segment_name} segment 
-                in the {market_type} market. Use the following relevant information from the textbook:
-                
-                {' '.join(chunk_contents[:3])}
-                
-                Provide a structured analysis including:
-                1. Key characteristics of this segment
-                2. Recommended positioning strategies
-                3. Potential marketing mix adaptations
-                """
-                
-                response = openai_client.chat.completions.create(
-                    model="gpt-4o",
-                    messages=[{"role": "user", "content": analysis_prompt}]
-                )
-                
-                analysis = response.choices[0].message.content
-                
-                # Store in state
-                rag_state["analysis_results"][segment_name] = {
-                    "analysis": analysis,
+                return {
+                    "segment_name": segment_name,
+                    "market_type": market_type,
+                    "chunks": chunk_contents[:3],
                     "sources": chunk_ids[:3]
                 }
-                
-                return analysis
-            else:
-                return "Could not find relevant content about this segment in the marketing literature."
-        else:
-            return "Could not find relevant segments in the marketing knowledge base."
-    
+        
+        return {"error": "No relevant content found in the marketing literature."}
     except Exception as e:
-        return f"Error analyzing market segment: {str(e)}"
+        return {"error": f"Error analyzing market segment: {str(e)}"}
 
-@traceable(name="generate_segment_strategy", run_type="chain")
-def generate_segment_strategy(segment_name: str, product_type: str, competitive_position: str = "challenger"):
-    """Generate a marketing strategy for a specific product in a segment."""
+@traceable(name="generate_segment_strategy")
+def generate_segment_strategy(segment_name: str, product_type: str, competitive_position: str = "challenger") -> Dict[str, Any]:
+    """Aggregate data for strategy generation (no LLM call)."""
     try:
-        # First get or create segment analysis
         if segment_name not in rag_state["analysis_results"]:
-            analyze_market_segment(segment_name)
-            
-        segment_analysis = rag_state["analysis_results"].get(segment_name, {}).get("analysis", "")
-        
+            analysis_result = analyze_market_segment(segment_name)
+            if isinstance(analysis_result, dict) and "error" in analysis_result:
+                return analysis_result
+            rag_state["analysis_results"][segment_name] = analysis_result
+
+        segment_analysis = rag_state["analysis_results"].get(segment_name, {}).get("chunks", [])
         if not segment_analysis:
-            return f"Could not find or generate analysis for the {segment_name} segment."
-            
-        # Generate strategy
-        strategy_prompt = f"""
-        Based on Philip Kotler's Marketing Management principles and the segment analysis below,
-        create a specific marketing strategy for a {competitive_position} company 
-        selling {product_type} in the {segment_name} segment.
+            return {"error": f"Could not find or generate analysis for the {segment_name} segment."}
         
-        Segment Analysis:
-        {segment_analysis[:1000]}
-        
-        Include:
-        1. Value proposition
-        2. Pricing strategy
-        3. Distribution channels
-        4. Promotion tactics
-        5. Key performance indicators
-        """
-        
-        response = openai_client.chat.completions.create(
-            model="gpt-4o",
-            messages=[{"role": "user", "content": strategy_prompt}]
-        )
-        
-        strategy = response.choices[0].message.content
-        return strategy
-        
+        return {
+            "segment_name": segment_name,
+            "product_type": product_type,
+            "competitive_position": competitive_position,
+            "segment_analysis": segment_analysis
+        }
     except Exception as e:
-        return f"Error generating segment strategy: {str(e)}"
+        return {"error": f"Error generating segment strategy: {str(e)}"}
 
 # A dictionary mapping tool names to functions
-# This will be used by the MCP server to register tools
 tool_functions = {
     "pinecone_search": pinecone_search,
     "fetch_s3_chunk": fetch_s3_chunk,

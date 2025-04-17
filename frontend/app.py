@@ -1,53 +1,52 @@
 import streamlit as st
+from frontend.utils import sidebar
 import sys
 import os
 
-# Add the root directory to the Python path for imports
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-# Import from config package
-from config import Config
-from frontend.utils import process_query, sidebar
+# Add root directory to path for imports
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Set page config to full width
+st.set_page_config(layout="wide")
 
 def show():
+    """Show main app interface"""
     sidebar()
-    st.title("🏠 Home - MarketScope AI")
-
-    # Access selected model and use Config to get the model name
-    model_id = st.session_state.get("selected_model", Config.DEFAULT_MODEL)
-    model_name = Config.get_model_config(model_id).get("name", model_id)
-    st.write(f"Using model: **{model_name}**")
-
+    
+    st.title("Welcome to MarketScope AI")
+    
     st.markdown("""
-    Welcome to the **MarketScope AI Platform**!  
-    This app uses AI agents to help businesses:
-    - Understand market segmentation
-    - Compare their products with competitors
-    - Optimize marketing strategies
-    - Analyze industry segments
-
-    Navigate using the sidebar to get started.
+    ## AI-Powered Healthcare Market Intelligence Platform
+    
+    MarketScope AI helps you understand and analyze different healthcare market segments 
+    using advanced AI and natural language processing. Select a segment from the sidebar 
+    to get started.
+    
+    ### Features:
+    - Market Segmentation Analysis
+    - Strategic Query Optimization
+    - Product Comparison
+    
+    ### Getting Started:
+    1. Select a healthcare segment from the sidebar
+    2. Navigate to one of our analysis tools
+    3. Enter your query or requirements
     """)
-
-    st.subheader("Select Healthcare Segment")
-    segment = st.selectbox(
-        "Choose a market segment:",
-        [
-            "Skincare Segment",
-            "Diagnostic Segment",
-            "Supplement Segment",
-            "OTC Pharmaceutical Segment",
-            "Wearable Segment"
-        ]
-    )
-
-    st.subheader("Upload Your Sales Data")
+    
+    # --- Upload sales product data ---
+    st.markdown("### Upload Your Sales/Product Data")
     uploaded_file = st.file_uploader(
-        "Upload your sales data (CSV or Excel format):",
-        type=["csv", "xlsx", "xls"]
+        "Upload a CSV or Excel file containing your sales or product data for analysis.",
+        type=["csv", "xlsx"]
     )
-
     if uploaded_file is not None:
         st.success(f"File '{uploaded_file.name}' uploaded successfully!")
-        # You can add code here to process the uploaded file if needed
+        # You can add further processing here if needed
+
+    # Display current segment if selected
+    if st.session_state.get("selected_segment"):
+        st.info(f"Currently analyzing: **{st.session_state.selected_segment}**")
+    else:
+        st.warning("Please select a segment from the sidebar to begin analysis.")
 
 show()

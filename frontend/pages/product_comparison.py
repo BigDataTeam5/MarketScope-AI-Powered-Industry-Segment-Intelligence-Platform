@@ -9,17 +9,21 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 # Import from config package
 from config import Config
 from frontend.utils import process_query,sidebar
+st.set_page_config(layout="wide")
+
 
 def show():
     """
     Display the Product Comparison page content
     """
-    # Get model information from session state
-    selected_model = st.session_state.get("selected_model", Config.DEFAULT_MODEL)
-    temperature = st.session_state.get("temperature", Config.DEFAULT_TEMPERATURE)
+    sidebar()
+    # Get model information from session state with fallback to config
+    selected_model = "gpt-4o"
+    temperature = 0.3
     
-    # Get model name for display
-    model_name = Config.get_model_config(selected_model).get("name", selected_model)
+    # Get model config for display
+    
+    model_name = "gpt-4o"
     
     st.title("Product Comparison Analysis")
     st.write(f"Using model: {model_name} with temperature: {temperature}")

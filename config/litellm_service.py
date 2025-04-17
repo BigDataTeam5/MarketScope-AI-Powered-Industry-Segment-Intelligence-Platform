@@ -4,77 +4,58 @@ Initializes LiteLLM with configuration from Config class
 """
 import os
 import litellm
-from typing import List, Dict, Any
-
-# Import the Config class from the same directory
+from typing import List, Dict, Any, Optional, Callable
+from langchain.tools import BaseTool
 from .config import Config
 
 class LiteLLMService:
     """Service class to handle LiteLLM configuration and operations"""
     
     def __init__(self):
-        """Initialize LiteLLM with configuration from Config class"""
-        self.initialize()
+        """Initialize LiteLLM service with default settings"""
+        self.current_model = "gpt-4o"  # Hardcoded to gpt-4o
+        self.temperature = Config.DEFAULT_TEMPERATURE
+        self._configure_api_keys()
     
-    def initialize(self):
-        """Initialize LiteLLM with settings from Config"""
-        # Get LiteLLM parameters
-        params = Config.get_litellm_params()
-        
-        # Set cache configuration
-        litellm.cache = params["cache"]
-        if litellm.cache:
-            litellm.cache_params = params["cache_params"]
-        
-        # Set API keys in environment variables for LiteLLM to use
-        for provider, api_key in params["api_key"].items():
-            if api_key:
-                os.environ[f"{provider.upper()}_API_KEY"] = api_key
+    def _configure_api_keys(self):
+        """Configure API keys for all supported providers"""
+        if Config.OPENAI_API_KEY:
+            os.environ["OPENAI_API_KEY"] = Config.OPENAI_API_KEY
+        if Config.ANTHROPIC_API_KEY:
+            os.environ["ANTHROPIC_API_KEY"] = Config.ANTHROPIC_API_KEY
+        if Config.GOOGLE_API_KEY:
+            os.environ["GOOGLE_API_KEY"] = Config.GOOGLE_API_KEY
+        if Config.GROK_API_KEY:
+            os.environ["XAI_API_KEY"] = Config.GROK_API_KEY
+        if Config.DEEPSEEK_API_KEY:
+            os.environ["DEEPSEEK_API_KEY"] = Config.DEEPSEEK_API_KEY
     
-    async def generate_completion(self, 
-                           model_name: str, 
-                           messages: List[Dict[str, str]], 
-                           temperature: float = None,
-                           max_tokens: int = None) -> Dict[str, Any]:
-        """
-        Generate completion using LiteLLM
-        
-        Args:
-            model_name: Short model name from Config.MODEL_CONFIGS
-            messages: List of message dictionaries with role and content
-            temperature: Temperature for generation (defaults to Config.DEFAULT_TEMPERATURE)
-            max_tokens: Maximum tokens to generate (defaults to model's max_output_tokens)
-            
-        Returns:
-            Dictionary containing the completion result
-        """
-        # Use default temperature if not specified
-        if temperature is None:
-            temperature = Config.DEFAULT_TEMPERATURE
-            
-        # Get full model name formatted for LiteLLM
-        litellm_model = Config.get_litellm_model_name(model_name)
-        
-        # Get model config
-        model_config = Config.get_model_config(model_name)
-        
-        # Use model's max output tokens if not specified
-        if max_tokens is None:
-            max_tokens = model_config.get("max_output_tokens", 2048)
-        
+    def get_model(self, model_name: str = None) -> str:
+        """Get the appropriate LiteLLM model name for the selected model"""
+        return "gpt-4o"  # Always return gpt-4o regardless of input
+    
+    def __call__(self, messages, model=None, temperature=None, **kwargs):
+        """Call the LLM service with configured settings"""
+        model = model or self.current_model
+        temperature = temperature or self.temperature
+        model_name = self.get_model(model)
+
         try:
-            response = await litellm.acompletion(
-                model=litellm_model,
+            response = litellm.completion(
+                model=model_name,
                 messages=messages,
                 temperature=temperature,
-                max_tokens=max_tokens
+                **kwargs
             )
-            
-            return response
+            # Properly extract message content from response
+            if hasattr(response, 'choices') and len(response.choices) > 0:
+                if hasattr(response.choices[0], 'message'):
+                    return response.choices[0].message
+                else:
+                    return str(response.choices[0])
+            return str(response)
         except Exception as e:
-            # Log the error
-            print(f"Error generating completion: {str(e)}")
-            raise
+            raise Exception(f"LiteLLM call failed: {str(e)}")
 
 # Create a singleton instance
 litellm_service = LiteLLMService()
