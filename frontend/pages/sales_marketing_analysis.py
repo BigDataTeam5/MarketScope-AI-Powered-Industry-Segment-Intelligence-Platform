@@ -138,7 +138,7 @@ def save_csv_to_local(df, segment_name):
             "message": f"Error saving data locally: {str(e)}"
         }
 
-
+# Function to upload data to Snowflake with proper error handling
 async def upload_to_snowflake(df, segment_name):
     # Initialize the Snowflake MCP client
     snowflake_mcp_client = None
@@ -193,15 +193,21 @@ async def upload_to_snowflake(df, segment_name):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         table_name = f"SALES_DATA_{timestamp}"
         
-        # Use Snowflake MCP client to load data
-        # Pass segment_name instead of schema parameter - this is the correct parameter the function expects
+        # Convert segment name to a valid schema name (uppercase, replace spaces with underscores)
+        schema_name = segment_name.upper().replace(" ", "_").replace("-", "_")
+        
+        # Use Snowflake MCP client to load data with segment-based schema
         response = await snowflake_mcp_client.invoke(
             "load_csv_to_table", 
             {
                 "table_name": table_name,
                 "csv_data": csv_string,
                 "create_table": True,
-                "segment_name": segment_name  # This is the correct parameter name
+                "segment_name": segment_name,
+                "schema": schema_name,                # Use segment as schema name
+                "database": "MARKETSCOPE",           # Default database
+                "warehouse": "COMPUTE_WH",           # Default warehouse
+                "create_schema_if_not_exists": True  # Automatically create schema if needed
             }
         )
         
