@@ -41,7 +41,7 @@ RUN echo "litellm" >> frontend-requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 RUN pip install --no-cache-dir -r frontend-requirements.txt
 
-# Copy rest of the code (this will get whatever directories exist)
+# Copy any existing code (this will take whatever is available)
 COPY . .
 
 # Create required directories if they don't exist
@@ -56,6 +56,17 @@ RUN if [ ! -f "/app/frontend/app.py" ]; then \
     echo "st.title('MarketScope AI Platform')" >> /app/frontend/app.py && \
     echo "st.write('Backend API URL: http://34.42.74.104:8000')" >> /app/frontend/app.py && \
     echo "st.info('Access the API documentation at http://34.42.74.104:8000/docs')" >> /app/frontend/app.py; \
+fi
+
+# Create a utils.py file if it doesn't exist
+RUN if [ ! -f "/app/frontend/utils.py" ]; then \
+    echo "import streamlit as st" > /app/frontend/utils.py && \
+    echo "import requests" >> /app/frontend/utils.py && \
+    echo "import sys, os" >> /app/frontend/utils.py && \
+    echo "API_URL = 'http://34.42.74.104:8000'" >> /app/frontend/utils.py && \
+    echo "def sidebar():" >> /app/frontend/utils.py && \
+    echo "    with st.sidebar:" >> /app/frontend/utils.py && \
+    echo "        st.title('MarketScope AI')" >> /app/frontend/utils.py; \
 fi
 
 # Create basic MCP server if it doesn't exist
@@ -76,30 +87,30 @@ RUN find /app -name "*.py" -exec dos2unix {} \; 2>/dev/null || true
 # Optional: Precompile Python files to catch syntax errors
 RUN find /app -name "*.py" | xargs -n1 python -m py_compile 2>/dev/null || true
 
+# Create start_services.sh script
+RUN echo '#!/bin/bash' > /app/start_services.sh && \
+    echo 'echo "Starting MCP servers..."' >> /app/start_services.sh && \
+    echo 'python /app/mcp_servers/run_all_servers.py &' >> /app/start_services.sh && \
+    echo 'MCP_PID=$!' >> /app/start_services.sh && \
+    echo 'echo "MCP servers started with PID: $MCP_PID"' >> /app/start_services.sh && \
+    echo '' >> /app/start_services.sh && \
+    echo 'echo "Contents of current directory:"' >> /app/start_services.sh && \
+    echo 'ls -la' >> /app/start_services.sh && \
+    echo '' >> /app/start_services.sh && \
+    echo 'echo "Contents of /app directory:"' >> /app/start_services.sh && \
+    echo 'ls -la /app' >> /app/start_services.sh && \
+    echo '' >> /app/start_services.sh && \
+    echo 'echo "Contents of /app/frontend directory:"' >> /app/start_services.sh && \
+    echo 'ls -la /app/frontend' >> /app/start_services.sh && \
+    echo '' >> /app/start_services.sh && \
+    echo 'echo "Starting Streamlit frontend..."' >> /app/start_services.sh && \
+    echo 'cd /app/frontend && streamlit run app.py --server.port=8501 --server.address=0.0.0.0' >> /app/start_services.sh
+
+# Make the script executable
+RUN chmod +x /app/start_services.sh
+
 # Expose backend service ports (MCP + optional APIs)
 EXPOSE 8000 8001 8010 8011 8012 8013 8014 8501
-
-# Create a script to run both services
-RUN echo '#!/bin/bash\n\
-echo "Starting MCP servers..."\n\
-python /app/mcp_servers/run_all_servers.py &\n\
-MCP_PID=$!\n\
-echo "MCP servers started with PID: $MCP_PID"\n\
-\n\
-echo "Contents of current directory:"\n\
-ls -la\n\
-\n\
-echo "Contents of /app directory:"\n\
-ls -la /app\n\
-\n\
-echo "Contents of /app/frontend directory:"\n\
-ls -la /app/frontend\n\
-\n\
-echo "Starting Streamlit frontend..."\n\
-cd /app/frontend && streamlit run app.py --server.port=8501 --server.address=0.0.0.0\n\
-' > /app/start_services.sh
-
-RUN chmod +x /app/start_services.sh
 
 # Start both services
 CMD ["/app/start_services.sh"]
