@@ -29,6 +29,15 @@ class Config:
     GROK_API_KEY = os.getenv("GROK_API_KEY")
     DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
     
+    # Snowflake Configuration
+    SNOWFLAKE_USER = os.getenv("SNOWFLAKE_USER", "")
+    SNOWFLAKE_PASSWORD = os.getenv("SNOWFLAKE_PASSWORD", "")
+    SNOWFLAKE_ACCOUNT = os.getenv("SNOWFLAKE_ACCOUNT", "")
+    SNOWFLAKE_WAREHOUSE = os.getenv("SNOWFLAKE_WAREHOUSE", "COMPUTE_WH")
+    SNOWFLAKE_DATABASE = os.getenv("SNOWFLAKE_DATABASE", "HEALTHCARE_INDUSTRY_CUSTOMER_DATA")
+    SNOWFLAKE_ROLE = os.getenv("SNOWFLAKE_ROLE", "ACCOUNTADMIN")
+    SNOWFLAKE_MCP_PORT = 8004
+    
     # Model Configuration
     DEFAULT_MODEL = "gpt-4o"
     DEFAULT_TEMPERATURE = 0.3

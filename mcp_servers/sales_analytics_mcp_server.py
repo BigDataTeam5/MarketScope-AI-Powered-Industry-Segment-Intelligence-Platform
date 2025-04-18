@@ -144,50 +144,21 @@ def create_sales_chart(metric: str = "REVENUE", group_by: str = "PRODUCT_NAME") 
                 "message": f"Column '{group_by}' not found in data"
             }
         
-        # Create chart
-        plt.figure(figsize=(10, 6))
+        # Group the data
         grouped_data = df.groupby(group_by)[metric].sum().sort_values(ascending=False)
         
-        # Create bar chart
-        ax = grouped_data.plot(kind="bar", color="skyblue")
-        plt.title(f"{metric} by {group_by}", fontsize=14)
-        plt.xlabel(group_by, fontsize=12)
-        plt.ylabel(metric, fontsize=12)
-        plt.grid(axis="y", alpha=0.3)
-        plt.xticks(rotation=45, ha="right")
-        
-        # Add value labels
-        for i, v in enumerate(grouped_data.values):
-            ax.text(i, v + (v * 0.01), f"{v:,.0f}", ha="center", fontsize=9)
-        
-        plt.tight_layout()
-        
-        # Save to base64 for embedding
-        buffer = io.BytesIO()
-        plt.savefig(buffer, format="png")
-        plt.close()
-        buffer.seek(0)
-        
-        image_base64 = base64.b64encode(buffer.read()).decode("utf-8")
-        
-        # Also save to file
-        file_path = f"{metric}_by_{group_by}.png"
-        plt.figure(figsize=(10, 6))
-        grouped_data.plot(kind="bar", color="skyblue")
-        plt.title(f"{metric} by {group_by}", fontsize=14)
-        plt.xlabel(group_by, fontsize=12)
-        plt.ylabel(metric, fontsize=12)
-        plt.grid(axis="y", alpha=0.3)
-        plt.xticks(rotation=45, ha="right")
-        plt.tight_layout()
-        plt.savefig(file_path)
-        plt.close()
+        # Convert to dict for JSON serialization
+        chart_data = {
+            "labels": grouped_data.index.tolist(),
+            "values": grouped_data.values.tolist(),
+            "type": "bar"
+        }
         
         return {
             "status": "success",
             "title": f"{metric} by {group_by}",
-            "image_base64": image_base64,
-            "file_path": file_path
+            "chart_data": chart_data,
+            "data": grouped_data.reset_index().to_dict(orient="records")
         }
     except Exception as e:
         logger.error(f"Error creating sales chart: {str(e)}")
@@ -270,60 +241,36 @@ def calculate_sales_forecast(periods: int = 6, product_name: Optional[str] = Non
             "FORECAST_REVENUE": forecast_y
         })
         
-        # Create chart
-        plt.figure(figsize=(12, 6))
+        # Prepare data for visualization
+        historical_data = {
+            "dates": df_agg["DATE"].dt.strftime("%Y-%m-%d").tolist(),
+            "revenues": df_agg["REVENUE"].tolist(),
+            "label": "Historical"
+        }
         
-        # Plot historical data
-        plt.plot(df_agg["DATE"], df_agg["REVENUE"], marker="o", label="Historical")
+        forecast_data = {
+            "dates": forecast_df["DATE"].dt.strftime("%Y-%m-%d").tolist(),
+            "revenues": forecast_df["FORECAST_REVENUE"].tolist(),
+            "label": "Forecast"
+        }
         
-        # Plot forecast
-        plt.plot(forecast_df["DATE"], forecast_df["FORECAST_REVENUE"], marker="x", linestyle="--", label="Forecast")
-        
-        plt.title(f"Sales Forecast - {product_name if product_name else 'All Products'}", fontsize=14)
-        plt.xlabel("Date", fontsize=12)
-        plt.ylabel("Revenue", fontsize=12)
-        plt.grid(True, alpha=0.3)
-        plt.legend()
-        
-        plt.tight_layout()
-        
-        # Save to base64 for embedding
-        buffer = io.BytesIO()
-        plt.savefig(buffer, format="png")
-        plt.close()
-        buffer.seek(0)
-        
-        image_base64 = base64.b64encode(buffer.read()).decode("utf-8")
-        
-        # Also save to file
-        file_path = f"sales_forecast_{product_name if product_name else 'all'}.png"
-        plt.figure(figsize=(12, 6))
-        plt.plot(df_agg["DATE"], df_agg["REVENUE"], marker="o", label="Historical")
-        plt.plot(forecast_df["DATE"], forecast_df["FORECAST_REVENUE"], marker="x", linestyle="--", label="Forecast")
-        plt.title(f"Sales Forecast - {product_name if product_name else 'All Products'}", fontsize=14)
-        plt.xlabel("Date", fontsize=12)
-        plt.ylabel("Revenue", fontsize=12)
-        plt.grid(True, alpha=0.3)
-        plt.legend()
-        plt.tight_layout()
-        plt.savefig(file_path)
-        plt.close()
-        
-        # Prepare forecast data
-        forecast_data = []
-        for i, row in forecast_df.iterrows():
-            forecast_data.append({
-                "date": row["DATE"].strftime("%Y-%m-%d"),
-                "revenue": float(row["FORECAST_REVENUE"])
-            })
+        # Prepare complete dataset for chart rendering in Streamlit
+        chart_data = {
+            "title": f"Sales Forecast - {product_name if product_name else 'All Products'}",
+            "historical": historical_data,
+            "forecast": forecast_data,
+            "type": "line",
+            "x_label": "Date",
+            "y_label": "Revenue"
+        }
         
         return {
             "status": "success",
             "product": product_name if product_name else "All Products",
             "forecast_periods": periods,
-            "forecast_data": forecast_data,
-            "image_base64": image_base64,
-            "file_path": file_path
+            "chart_data": chart_data,
+            "historical_df": df_agg.to_dict(orient="records"),
+            "forecast_df": forecast_df.to_dict(orient="records")
         }
     except Exception as e:
         logger.error(f"Error calculating sales forecast: {str(e)}")
@@ -332,9 +279,7 @@ def calculate_sales_forecast(periods: int = 6, product_name: Optional[str] = Non
             "message": str(e)
         }
 
-# Mount MCP server to FastAPI app
-# The mount_to_app method is deprecated in newer versions of FastMCP
-# Instead, we'll use the FastAPI mount method
+
 app.mount("/mcp", mcp_server.sse_app())
 
 # Add health check endpoint

@@ -15,7 +15,6 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from mcp.server.fastmcp import FastMCP
-from mcp.server.sse import SSETransport
 import uvicorn
 
 # Set up logging
@@ -235,54 +234,24 @@ class SegmentMCPServer:
                         "message": f"Column '{group_by}' not found in data. Available columns: {', '.join(df.columns)}"
                     }
                 
-                import matplotlib.pyplot as plt
-                
-                # Create figure with larger size
-                plt.figure(figsize=(15, 8))
-                
                 # Group the data
                 grouped = df.groupby(group_by)[metric].sum().sort_values(ascending=False)
                 
-                # Create visualization
-                ax = grouped.plot(kind='bar', color='skyblue')
-                plt.title(f'{metric} by {group_by} ({self.segment_name})', fontsize=16)
-                plt.xlabel(group_by.replace('_', ' ').title(), fontsize=14)
-                plt.ylabel(metric.replace('_', ' ').title(), fontsize=14)
-                plt.xticks(rotation=45, ha='right', fontsize=12)
-                plt.grid(True, axis='y', alpha=0.3, linestyle='--')
-                
-                # Add value labels on top of bars
-                for i, v in enumerate(grouped.values):
-                    ax.text(i, v + (v * 0.02), f'{v:,.0f}', ha='center', fontsize=10)
-                
-                plt.tight_layout()
-                
-                # Save to a base64 string for embedding in UI
-                buffer = io.BytesIO()
-                plt.savefig(buffer, format='png')
-                plt.close()
-                buffer.seek(0)
-                image_base64 = base64.b64encode(buffer.read()).decode('utf-8')
-                
-                # Also save to file with segment name
-                plt.figure(figsize=(15, 8))
-                grouped.plot(kind='bar', color='skyblue')
-                plt.title(f'{metric} by {group_by} ({self.segment_name})', fontsize=16)
-                plt.xlabel(group_by.replace('_', ' ').title(), fontsize=14)
-                plt.ylabel(metric.replace('_', ' ').title(), fontsize=14)
-                plt.xticks(rotation=45, ha='right', fontsize=12)
-                plt.grid(True, axis='y', alpha=0.3, linestyle='--')
-                plt.tight_layout()
-                file_path = f"{self.segment_name.lower().replace(' ', '_')}_viz.png"
-                plt.savefig(file_path)
-                plt.close()
+                # Convert to data format for visualization in Streamlit
+                chart_data = {
+                    "labels": grouped.index.tolist(),
+                    "values": grouped.values.tolist(), 
+                    "type": "bar",
+                    "x_label": group_by.replace('_', ' ').title(),
+                    "y_label": metric.replace('_', ' ').title(),
+                    "title": f'{metric} by {group_by} ({self.segment_name})'
+                }
                 
                 return {
                     "status": "success",
                     "title": f"{metric} by {group_by} ({self.segment_name})",
-                    "image_base64": image_base64,
-                    "file_path": file_path,
-                    "data": grouped.to_dict(),
+                    "chart_data": chart_data,
+                    "data": grouped.reset_index().to_dict(orient="records"),
                     "segment": self.segment_name,
                     "schema": self.schema_name
                 }
@@ -646,7 +615,6 @@ class SegmentMCPServer:
                 
                 # Get the dataframe
                 import numpy as np
-                import matplotlib.pyplot as plt
                 
                 df = self.state["product_trends_df"]
                 
@@ -666,27 +634,32 @@ class SegmentMCPServer:
                         ))) if x else np.nan
                     )
                 
-                # Create the visualization based on type
+                # Prepare chart data based on visualization type
                 if visualization_type == "price_comparison":
                     # Group by product_name and calculate average price
-                    plt.figure(figsize=(12, 8))
                     avg_prices = df.groupby("product_name")["price_value"].mean().sort_values(ascending=False)
                     
-                    # Create bar chart
-                    ax = avg_prices.plot(kind="bar", color="skyblue")
-                    plt.title(f"Average Price Comparison - {self.segment_name}", fontsize=16)
-                    plt.xlabel("Product", fontsize=14)
-                    plt.ylabel("Average Price ($)", fontsize=14)
-                    plt.xticks(rotation=45, ha="right", fontsize=12)
-                    plt.grid(axis="y", alpha=0.3, linestyle="--")
+                    # Prepare data for Streamlit visualization
+                    chart_data = {
+                        "type": "bar",
+                        "title": f"Average Price Comparison - {self.segment_name}",
+                        "x_label": "Product",
+                        "y_label": "Average Price ($)",
+                        "labels": avg_prices.index.tolist(),
+                        "values": avg_prices.values.tolist(),
+                        "color": "skyblue"
+                    }
                     
-                    # Add value labels
-                    for i, v in enumerate(avg_prices):
-                        ax.text(i, v + 1, f"${v:.2f}", ha="center", fontsize=10)
-                    
-                    plt.tight_layout()
-                    title = f"Price Comparison - {self.segment_name}"
-                    filename = f"{self.segment_name.lower().replace(' ', '_')}_price_comparison.png"
+                    return {
+                        "status": "success",
+                        "title": f"Price Comparison - {self.segment_name}",
+                        "visualization_type": visualization_type,
+                        "segment": self.segment_name,
+                        "chart_data": chart_data,
+                        "data": avg_prices.reset_index().to_dict(orient="records"),
+                        "sample_size": len(df),
+                        "products_analyzed": df["product_name"].nunique()
+                    }
                     
                 elif visualization_type == "rating_analysis":
                     # Filter out rows without ratings
@@ -702,30 +675,33 @@ class SegmentMCPServer:
                     df_with_ratings["rating_value"] = pd.to_numeric(df_with_ratings["rating"], errors="coerce")
                     
                     # Group by product and calculate average rating
-                    plt.figure(figsize=(12, 8))
                     avg_ratings = df_with_ratings.groupby("product_name")["rating_value"].mean().sort_values(ascending=False)
                     
-                    # Create bar chart with different color
-                    ax = avg_ratings.plot(kind="bar", color="lightgreen")
-                    plt.title(f"Average Rating Comparison - {self.segment_name}", fontsize=16)
-                    plt.xlabel("Product", fontsize=14)
-                    plt.ylabel("Average Rating (out of 5)", fontsize=14)
-                    plt.xticks(rotation=45, ha="right", fontsize=12)
-                    plt.grid(axis="y", alpha=0.3, linestyle="--")
-                    plt.ylim(0, 5.5)  # Ratings are typically out of 5
+                    # Prepare data for Streamlit visualization
+                    chart_data = {
+                        "type": "bar",
+                        "title": f"Average Rating Comparison - {self.segment_name}",
+                        "x_label": "Product",
+                        "y_label": "Average Rating (out of 5)",
+                        "labels": avg_ratings.index.tolist(),
+                        "values": avg_ratings.values.tolist(),
+                        "color": "lightgreen",
+                        "y_min": 0,
+                        "y_max": 5.5
+                    }
                     
-                    # Add value labels
-                    for i, v in enumerate(avg_ratings):
-                        ax.text(i, v + 0.1, f"{v:.1f}", ha="center", fontsize=10)
-                    
-                    plt.tight_layout()
-                    title = f"Rating Analysis - {self.segment_name}"
-                    filename = f"{self.segment_name.lower().replace(' ', '_')}_rating_analysis.png"
+                    return {
+                        "status": "success",
+                        "title": f"Rating Analysis - {self.segment_name}",
+                        "visualization_type": visualization_type,
+                        "segment": self.segment_name,
+                        "chart_data": chart_data,
+                        "data": avg_ratings.reset_index().to_dict(orient="records"),
+                        "sample_size": len(df_with_ratings),
+                        "products_analyzed": df_with_ratings["product_name"].nunique()
+                    }
                     
                 elif visualization_type == "price_distribution":
-                    # Create histogram of prices
-                    plt.figure(figsize=(12, 8))
-                    
                     # Filter out missing prices
                     price_data = df.dropna(subset=["price_value"])["price_value"]
                     
@@ -735,52 +711,52 @@ class SegmentMCPServer:
                             "message": "No price data available for visualization"
                         }
                     
-                    # Create histogram
-                    plt.hist(price_data, bins=20, color="salmon", alpha=0.7, edgecolor="black")
-                    plt.title(f"Price Distribution - {self.segment_name}", fontsize=16)
-                    plt.xlabel("Price ($)", fontsize=14)
-                    plt.ylabel("Frequency", fontsize=14)
-                    plt.grid(axis="y", alpha=0.3, linestyle="--")
-                    
-                    # Add median and mean lines
+                    # Calculate statistics for the histogram
                     median_price = price_data.median()
                     mean_price = price_data.mean()
-                    plt.axvline(median_price, color="blue", linestyle="dashed", linewidth=2, label=f"Median: ${median_price:.2f}")
-                    plt.axvline(mean_price, color="red", linestyle="dashed", linewidth=2, label=f"Mean: ${mean_price:.2f}")
-                    plt.legend(fontsize=12)
                     
-                    plt.tight_layout()
-                    title = f"Price Distribution - {self.segment_name}"
-                    filename = f"{self.segment_name.lower().replace(' ', '_')}_price_distribution.png"
+                    # Group data into bins for histogram
+                    min_price = price_data.min()
+                    max_price = price_data.max()
+                    bins = 20
+                    bin_width = (max_price - min_price) / bins if max_price > min_price else 1
+                    
+                    hist, bin_edges = np.histogram(price_data, bins=bins)
+                    
+                    # Prepare data for Streamlit visualization
+                    chart_data = {
+                        "type": "histogram",
+                        "title": f"Price Distribution - {self.segment_name}",
+                        "x_label": "Price ($)",
+                        "y_label": "Frequency",
+                        "hist_values": hist.tolist(),
+                        "bin_edges": bin_edges.tolist(),
+                        "median": float(median_price),
+                        "mean": float(mean_price),
+                        "color": "salmon"
+                    }
+                    
+                    return {
+                        "status": "success",
+                        "title": f"Price Distribution - {self.segment_name}",
+                        "visualization_type": visualization_type,
+                        "segment": self.segment_name,
+                        "chart_data": chart_data,
+                        "data": price_data.to_frame("price").reset_index(drop=True).to_dict(orient="records"),
+                        "statistics": {
+                            "median": float(median_price),
+                            "mean": float(mean_price),
+                            "min": float(min_price),
+                            "max": float(max_price),
+                        },
+                        "sample_size": len(price_data)
+                    }
                 
                 else:
                     return {
                         "status": "error",
                         "message": f"Unknown visualization type: {visualization_type}. Supported types: price_comparison, rating_analysis, price_distribution"
                     }
-                
-                # Save to a base64 string for embedding in UI
-                buffer = io.BytesIO()
-                plt.savefig(buffer, format="png")
-                plt.close()
-                buffer.seek(0)
-                image_base64 = base64.b64encode(buffer.read()).decode("utf-8")
-                
-                # Save to file
-                plt.figure(figsize=(12, 8))
-                plt.savefig(filename)
-                plt.close()
-                
-                return {
-                    "status": "success",
-                    "title": title,
-                    "visualization_type": visualization_type,
-                    "segment": self.segment_name,
-                    "image_base64": image_base64,
-                    "file_path": filename,
-                    "sample_size": len(df),
-                    "products_analyzed": df["product_name"].nunique()
-                }
                 
             except Exception as e:
                 logger.error(f"Error in create_trends_visualization: {str(e)}")
@@ -816,8 +792,15 @@ class SegmentMCPServer:
         uvicorn.run(self.app, host="0.0.0.0", port=self.port)
 
 
-def run_segment_server(segment_name: str):
-    """Run a single segment MCP server based on configuration in Config class"""
+def create_segment_server(segment_name: str = "Skin Care Segment"):
+    """Create a segment-specific MCP server based on configuration in Config class
+    
+    Args:
+        segment_name: Name of the segment to create a server for
+        
+    Returns:
+        SegmentMCPServer instance
+    """
     if segment_name not in Config.SEGMENT_CONFIG:
         raise ValueError(f"Unknown segment: {segment_name}")
         
@@ -826,17 +809,23 @@ def run_segment_server(segment_name: str):
     port = segment_config["port"]
     server_name = Config.MCP_SERVER_NAMES.get(segment_name, segment_name.replace(" ", "_").lower() + "_mcp_server")
     
-    # Create and run the server
-    server = SegmentMCPServer(
+    # Create the server
+    return SegmentMCPServer(
         segment_name=segment_name,
         schema_name=schema_name,
         server_name=server_name,
         port=port
     )
-    
-    print(f"Starting {segment_name} MCP Server on port {port}")
-    server.mount_and_run()
 
+def run_segment_server(segment_name: str):
+    """Run a single segment MCP server based on configuration in Config class"""
+    srv = create_segment_server(segment_name)
+    print(f"Starting {segment_name} MCP Server on port {srv.port}")
+    srv.mount_and_run()
+
+# Create a default server instance for importing by run_all_servers.py
+# Using skin care as default segment, but can be overridden when actually running
+server = create_segment_server("Skin Care Segment")
 
 # Main entry point
 if __name__ == "__main__":

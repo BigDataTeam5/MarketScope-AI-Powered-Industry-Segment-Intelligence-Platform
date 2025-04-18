@@ -6,8 +6,6 @@ RAG with Philip Kotler's Marketing Management book
 import json
 import boto3
 from openai import OpenAI
-import pandas as pd
-import os
 import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -205,72 +203,13 @@ def analyze_market_segment(segment_name: str, market_type: str = "healthcare") -
                 rag_state["analysis_results"][segment_name] = result
                 
                 return result
-        
-        # Fallback to mock data if no relevant content found
-        mock_data = {
-            "Diagnostic Segment": {
-                "market_size": "$52.8 billion",
-                "growth_rate": "8.3%",
-                "key_players": ["Abbott", "Roche", "Siemens Healthineers", "Danaher", "Thermo Fisher Scientific"],
-                "trends": [
-                    "Shift to point-of-care testing",
-                    "Rise of AI-powered diagnostics",
-                    "Increasing demand for personalized diagnostics"
-                ]
-            },
-            "Supplement Segment": {
-                "market_size": "$151.9 billion",
-                "growth_rate": "5.6%",
-                "key_players": ["Amway", "Herbalife", "Glanbia", "GNC", "NOW Foods"],
-                "trends": [
-                    "Growing demand for personalized nutrition",
-                    "Shift to plant-based supplements",
-                    "Rise of gummy vitamins and functional foods"
-                ]
-            },
-            "Otc Pharmaceutical Segment": {
-                "market_size": "$168.4 billion",
-                "growth_rate": "4.2%",
-                "key_players": ["Johnson & Johnson", "Bayer", "Sanofi", "GSK", "Pfizer"],
-                "trends": [
-                    "Increasing self-medication trends",
-                    "Growing e-commerce sales",
-                    "Focus on natural and organic remedies"
-                ]
-            },
-            "Fitness Wearable Segment": {
-                "market_size": "$48.2 billion",
-                "growth_rate": "15.4%",
-                "key_players": ["Apple", "Fitbit", "Garmin", "Samsung", "Huawei"],
-                "trends": [
-                    "Integration with healthcare systems",
-                    "Advanced biometric monitoring",
-                    "Focus on sleep and recovery metrics"
-                ]
-            },
-            "Skin Care Segment": {
-                "market_size": "$183.1 billion",
-                "growth_rate": "9.7%",
-                "key_players": ["L'Oréal", "Estée Lauder", "Unilever", "Procter & Gamble", "Beiersdorf"],
-                "trends": [
-                    "Clean beauty movement",
-                    "Personalized skincare solutions",
-                    "Science-backed clinical skincare"
-                ]
-            }
+                
+        # If no chunks found
+        return {
+            "status": "error",
+            "message": f"No relevant content found for segment: {segment_name} in {market_type}"
         }
         
-        if segment_name in mock_data:
-            result = {
-                "segment_name": segment_name,
-                "market_type": market_type,
-                "insights": mock_data[segment_name],
-                "note": "Using market insights data as no relevant book content was found."
-            }
-            rag_state["analysis_results"][segment_name] = result
-            return result
-        
-        return {"error": "No relevant content found in the marketing literature."}
     except Exception as e:
         logger.error(f"Error analyzing market segment: {str(e)}")
         return {"error": f"Error analyzing market segment: {str(e)}"}
@@ -298,119 +237,17 @@ def generate_segment_strategy(segment_name: str, product_type: str, competitive_
             chunk_sources = segment_analysis.get("sources", [])
             
             return {
+                "status": "success",
                 "segment_name": segment_name,
                 "product_type": product_type,
                 "competitive_position": competitive_position,
                 "segment_analysis": chunk_content,
-                "sources": chunk_sources,
-                "from_kotler": True
-            }
-        
-        # Fallback to mock strategies if no relevant content found
-        strategy_templates = {
-            "Diagnostic Segment": {
-                "positioning": "Position products as essential for early detection and prevention",
-                "channels": ["Healthcare providers", "Laboratories", "Direct-to-consumer"],
-                "key_messages": [
-                    "Accurate results you can trust",
-                    "Fast turnaround times",
-                    "Easy integration with healthcare systems"
-                ],
-                "recommendations": [
-                    "Focus on clinical validation and accuracy",
-                    "Develop educational content for healthcare providers",
-                    "Invest in direct-to-consumer marketing for home testing kits"
-                ]
-            },
-            "Supplement Segment": {
-                "positioning": "Position products as part of a holistic wellness routine",
-                "channels": ["Health food stores", "E-commerce", "Social media influencers"],
-                "key_messages": [
-                    "Science-backed formulations",
-                    "Sustainable and clean ingredients",
-                    "Supporting overall wellness goals"
-                ],
-                "recommendations": [
-                    "Develop educational content on supplement benefits",
-                    "Partner with wellness influencers",
-                    "Invest in transparent supply chain messaging"
-                ]
-            },
-            "Otc Pharmaceutical Segment": {
-                "positioning": "Position products as effective, safe alternatives to prescription medications",
-                "channels": ["Pharmacies", "Retail stores", "E-commerce"],
-                "key_messages": [
-                    "Fast, effective relief",
-                    "Trusted by healthcare professionals",
-                    "Convenient and accessible solutions"
-                ],
-                "recommendations": [
-                    "Focus on packaging that communicates efficacy",
-                    "Develop point-of-purchase displays",
-                    "Create symptom-specific educational content"
-                ]
-            },
-            "Fitness Wearable Segment": {
-                "positioning": "Position products as essential tools for health optimization",
-                "channels": ["Sporting goods retailers", "E-commerce", "Fitness apps"],
-                "key_messages": [
-                    "Data-driven insights for better health",
-                    "Seamless integration with your lifestyle",
-                    "Personalized recommendations for improvement"
-                ],
-                "recommendations": [
-                    "Focus on user experience and app functionality",
-                    "Develop community features",
-                    "Partner with healthcare providers for validation"
-                ]
-            },
-            "Skin Care Segment": {
-                "positioning": "Position products as scientific skincare solutions",
-                "channels": ["Beauty retailers", "Dermatologists", "Social media"],
-                "key_messages": [
-                    "Clinically proven results",
-                    "Dermatologist-recommended formulations",
-                    "Personalized skincare solutions"
-                ],
-                "recommendations": [
-                    "Invest in clinical studies",
-                    "Develop personalized diagnostic tools",
-                    "Create educational content about skin health"
-                ]
-            }
-        }
-        
-        # Return strategy for the requested segment or default message
-        if segment_name in strategy_templates:
-            strategy = strategy_templates[segment_name]
-            
-            # Adjust based on competitive position
-            if competitive_position == "leader":
-                strategy["positioning"] += " with market-leading innovation"
-                strategy["recommendations"].append("Focus on defending market share while expanding the total market")
-            elif competitive_position == "challenger":
-                strategy["positioning"] += " with unique competitive advantages"
-                strategy["recommendations"].append("Target specific segments where the leader is vulnerable")
-            elif competitive_position == "follower":
-                strategy["positioning"] += " with excellent value"
-                strategy["recommendations"].append("Focus on profitability through operational efficiency")
-            elif competitive_position == "nicher":
-                strategy["positioning"] += " for specialized needs"
-                strategy["recommendations"].append("Develop deep expertise in narrow segments that larger players ignore")
-            
-            return {
-                "status": "success",
-                "segment": segment_name,
-                "product_type": product_type,
-                "competitive_position": competitive_position,
-                "strategy": strategy,
-                "from_kotler": False,
-                "note": "Using market strategy templates as no specific content from Kotler's book was found."
+                "sources": chunk_sources
             }
         else:
             return {
                 "status": "error",
-                "message": f"No strategy template available for segment: {segment_name}"
+                "message": f"No strategy data available for segment: {segment_name}"
             }
     except Exception as e:
         logger.error(f"Error generating segment strategy: {str(e)}")
@@ -461,8 +298,6 @@ def query_marketing_book(query: str, top_k: int = 3) -> Dict[str, Any]:
         }
 
 # Mount MCP server to FastAPI app
-# The mount_to_app method is deprecated in newer versions of FastMCP
-# Instead, we'll use the FastAPI mount method
 app.mount("/mcp", mcp_server.sse_app())
 
 # Add health check endpoint

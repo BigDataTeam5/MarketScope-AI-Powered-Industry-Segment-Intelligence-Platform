@@ -66,7 +66,7 @@ class CustomMCPClient:
             await self._ensure_session()
             
             # Make request to tools endpoint
-            tools_url = f"{self.base_url}/tools"
+            tools_url = f"{self.base_url}/mcp/tools"
             logger.info(f"Fetching tools from: {tools_url}")
             async with self.session.get(tools_url) as response:
                 if response.status != 200:
@@ -105,7 +105,7 @@ class CustomMCPClient:
             await self._ensure_session()
             
             # Make request to invoke endpoint
-            invoke_url = f"{self.base_url}/tools/{tool_name}/invoke"
+            invoke_url = f"{self.base_url}/mcp/tools/{tool_name}/invoke"
             
             # Prepare request payload
             payload = {
@@ -175,13 +175,14 @@ class MCPClient:
     Provides easy access to different MCP servers based on service name.
     """
     
-    # Map of service names to their base URLs
+    # Map of service names to their base URLs with specific ports
     SERVICE_URLS = {
-        "snowflake": f"http://localhost:{Config.MCP_PORT}",
-        "market_analysis": f"http://localhost:{Config.MCP_PORT}",
-        "segment": f"http://localhost:{Config.MCP_PORT}",
-        "sales_analytics": f"http://localhost:{Config.MCP_PORT}",
-        "unified": f"http://localhost:{Config.MCP_PORT}"
+        "snowflake": "http://localhost:8004",
+        "market_analysis": "http://localhost:8001",
+        "segment": "http://localhost:8003",
+        "sales_analytics": "http://localhost:8002",
+        "unified": f"http://localhost:{Config.MCP_PORT}",
+        "marketscope": f"http://localhost:{Config.MCP_PORT}"
     }
     
     def __init__(self, service_name: str):
@@ -201,6 +202,8 @@ class MCPClient:
         env_url = os.environ.get(f"{service_name.upper()}_MCP_URL")
         if env_url:
             service_url = env_url
+            
+        logger.info(f"Initializing {service_name} MCP client with URL: {service_url}")
             
         # Create CustomMCPClient
         self.client = CustomMCPClient(service_url)

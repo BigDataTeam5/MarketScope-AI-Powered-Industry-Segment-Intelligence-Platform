@@ -88,7 +88,7 @@ def save_csv_to_local(df, segment_name):
             
         # Generate filename with timestamp
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"{segment_name}_sales_data_{timestamp}.csv"
+        filename = f"{segment_name}_sales_data.csv"
         filepath = os.path.join(data_dir, filename)
         
         # Save dataframe to CSV
@@ -107,33 +107,56 @@ def save_csv_to_local(df, segment_name):
 
 # Function to upload data to Snowflake with proper error handling
 async def upload_to_snowflake(df, segment_name):
+    # Initialize the Snowflake MCP client - use "snowflake" service directly
+    snowflake_mcp_client = None
     try:
-        # Initialize the Snowflake MCP client - use "snowflake" service directly
-        snowflake_mcp_client = MCPClient("snowflake")
+        # Enhanced logging
+        st.info("Connecting to Snowflake MCP server...")
+        print("Connecting to Snowflake MCP server...")
+        
+        # Create and configure custom client directly to port 8004 to ensure proper connection
+        from agents.custom_mcp_client import CustomMCPClient
+        snowflake_mcp_client = CustomMCPClient("http://localhost:8004")
+        print(f"Connecting to Snowflake at: http://localhost:8004")
         
         # Check if Snowflake server is available first
         try:
             # Quick check to see if the server is responding
-            tools = await asyncio.wait_for(snowflake_mcp_client.get_tools(), timeout=3.0)
+            print("Fetching tools from http://localhost:8004/mcp/tools")
+            
+            tools = await asyncio.wait_for(snowflake_mcp_client.get_tools(force_refresh=True), timeout=5.0)
+            
             if not tools:
+                print("No tools found in response")
                 return {
                     "status": "error",
                     "message": "Snowflake MCP server is not available - no tools found"
                 }
             
+            # Debug: print all tools found
+            print(f"Found {len(tools)} tools:")
+            for t in tools:
+                print(f"- {t.get('name')}: {t.get('description')}")
+            
             # Check if the required tool exists
             tool_exists = any(tool.get("name") == "load_csv_to_table" for tool in tools)
             if not tool_exists:
+                print("load_csv_to_table tool not found in tools list")
                 return {
                     "status": "error",
                     "message": "Snowflake load_csv_to_table tool not available"
                 }
+                
+            print("Required tool 'load_csv_to_table' found!")
+            
         except asyncio.TimeoutError:
+            print("Connection to Snowflake MCP server timed out")
             return {
                 "status": "error",
                 "message": "Snowflake MCP server connection timed out"
             }
         except Exception as e:
+            print(f"Error connecting to Snowflake MCP server: {str(e)}")
             return {
                 "status": "error",
                 "message": f"Cannot connect to Snowflake MCP server: {str(e)}"
@@ -148,22 +171,30 @@ async def upload_to_snowflake(df, segment_name):
         table_name = f"SALES_DATA"
         
         # Use Snowflake MCP client to load data
-        # This matches the parameters in snowflake_mcp_server.py
+        print(f"Invoking load_csv_to_table tool with segment: {segment_name}")
         response = await snowflake_mcp_client.invoke("load_csv_to_table", {
             "table_name": table_name,
             "csv_data": csv_string,
-            "create_table": True
+            "create_table": True,
+            "segment_name": segment_name
         })
+        
+        print(f"Snowflake response: {response}")
         
         return {
             "status": "success" if "Error" not in str(response) else "error",
             "message": str(response)
         }
     except Exception as e:
+        print(f"Snowflake upload error: {str(e)}")
         return {
             "status": "error",
             "message": f"Snowflake upload error: {str(e)}"
         }
+    finally:
+        # Ensure client is properly closed to avoid unclosed session warnings
+        if snowflake_mcp_client:
+            await snowflake_mcp_client.close()
 
 # Function to parse JSON results from queries or return dataframe with error message
 def parse_query_result(result):
@@ -281,36 +312,36 @@ if 'sales_data' in st.session_state and st.session_state['sales_data'] is not No
 if 'sales_data' in st.session_state and st.session_state['sales_data'] is not None and selected_segment:
     if st.button("Upload Data", key="upload_data", type="primary"):
         with st.spinner(f"Uploading data for {selected_segment}..."):
-            # First try to upload to Snowflake
-            try:
-                result = asyncio.run(upload_to_snowflake(st.session_state['sales_data'], selected_segment))
+            # Always save locally first to ensure data is preserved
+            local_result = save_csv_to_local(st.session_state['sales_data'], selected_segment)
+            if local_result["status"] == "success":
+                # Local save was successful, now try to upload to Snowflake
+                st.success(f"✅ Data saved locally for analysis: {local_result['filepath']}")
                 
-                # If Snowflake upload succeeded
-                if result["status"] == "success" and "Error" not in result["message"] and "Not Found" not in result["message"]:
-                    st.session_state['snowflake_uploaded'] = True
-                    st.success("✅ Data successfully uploaded to Snowflake!")
-                    st.info("You can now click 'Generate Analysis' in the sidebar.")
-                else:
-                    # Fallback to local storage if Snowflake upload fails
-                    st.warning(f"Snowflake upload failed: {result['message']}")
-                    st.info("Falling back to local storage...")
+                # Attempt Snowflake upload
+                try:
+                    with st.spinner("Connecting to Snowflake..."):
+                        result = asyncio.run(upload_to_snowflake(st.session_state['sales_data'], selected_segment))
                     
-                    # Save CSV locally
-                    local_result = save_csv_to_local(st.session_state['sales_data'], selected_segment)
-                    if local_result["status"] == "success":
-                        st.session_state['snowflake_uploaded'] = True  # Enable analysis even with local storage
-                        st.success(f"✅ Data saved locally for analysis: {local_result['filepath']}")
-                        st.info("You can now click 'Generate Analysis' in the sidebar.")
+                    # If Snowflake upload succeeded
+                    if result["status"] == "success" and "Error" not in str(result["message"]) and "Not Found" not in str(result["message"]):
+                        st.session_state['snowflake_uploaded'] = True
+                        st.success("✅ Data also uploaded to Snowflake for advanced analytics!")
                     else:
-                        st.error(f"Failed to save data: {local_result['message']}")
-            except Exception as e:
-                st.error(f"Upload error: {str(e)}")
-                # Try local fallback
-                local_result = save_csv_to_local(st.session_state['sales_data'], selected_segment)
-                if local_result["status"] == "success":
-                    st.session_state['snowflake_uploaded'] = True
-                    st.success(f"✅ Data saved locally for analysis: {local_result['filepath']}")
-                    st.info("You can now click 'Generate Analysis' in the sidebar.")
+                        # Snowflake upload failed but we already have local storage
+                        st.session_state['snowflake_uploaded'] = True  # Still enable analysis with local data
+                        st.warning(f"Note: Snowflake upload attempt failed: {result['message']}")
+                        st.info("Proceeding with local data analysis instead.")
+                except Exception as e:
+                    # Snowflake upload exception but we already have local storage
+                    st.session_state['snowflake_uploaded'] = True  # Still enable analysis with local data
+                    st.warning(f"Note: Could not connect to Snowflake: {str(e)}")
+                    st.info("Proceeding with local data analysis only.")
+                
+                st.info("You can now click 'Generate Analysis' in the sidebar.")
+            else:
+                # Local save failed
+                st.error(f"Failed to save data: {local_result['message']}")
 
 # Function to generate analysis
 def generate_analysis(df, segment):

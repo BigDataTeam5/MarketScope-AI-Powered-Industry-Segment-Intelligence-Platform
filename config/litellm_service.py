@@ -34,58 +34,54 @@ def get_llm_model(model_name: Optional[str] = None, temperature: Optional[float]
         LangChain compatible model
     """
     try:
-# Import LiteLLM and related packages
-        try:
-            import litellm
-            from langchain_community.llms.litellm import LiteLLM
-        except ImportError:
-            try:
-                import litellm
-                # Fallback for older langchain versions
-                from langchain.llms.litellm import LiteLLM
-            except ImportError:
-                # Try to install the package if it's missing
-                import subprocess
-                import sys
-                subprocess.check_call([sys.executable, "-m", "pip", "install", "langchain-community", "litellm"])
-                import litellm
-                from langchain_community.llms.litellm import LiteLLM
-        
+        # Import LiteLLM core
+        import litellm
+
         # Set default API keys
         litellm.openai_api_key = os.getenv("OPENAI_API_KEY", Config.OPENAI_API_KEY)
         litellm.anthropic_api_key = os.getenv("ANTHROPIC_API_KEY", Config.ANTHROPIC_API_KEY)
         litellm.google_api_key = os.getenv("GOOGLE_API_KEY", Config.GOOGLE_API_KEY)
-        
-        # Set model name and temperature
+
+        # Determine model config
         model = model_name or Config.DEFAULT_MODEL
         temp = temperature if temperature is not None else Config.DEFAULT_TEMPERATURE
-        
-        # Create and return LiteLLM instance
-        return LiteLLM(
-            model=model,
-            temperature=temp,
-            streaming=True
-        )
-    
+
+        # Define a LangChain-compatible wrapper
+        class LiteLLMWrap:
+            def __init__(self, model, temperature=0.7):
+                self.model = model
+                self.temperature = temperature
+
+            def invoke(self, prompt: str):
+                response = litellm.completion(
+                    model=self.model,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=self.temperature,
+                    stream=False
+                )
+                return response["choices"][0]["message"]["content"]
+
+        return LiteLLMWrap(model=model, temperature=temp)
+
     except ImportError as e:
         logger.error(f"Error importing LiteLLM: {str(e)}")
         logger.warning("Falling back to mock LLM for development")
-        
+
         # Fallback to mock LLM for development
         from langchain_community.llms.fake import FakeListLLM
-        
+
         return FakeListLLM(
             responses=["I'm a mock LLM model for development. LiteLLM could not be imported."]
         )
     except Exception as e:
         logger.error(f"Error initializing LLM model: {str(e)}")
-        
+
         # Return a more informative error message
         from langchain_community.llms.fake import FakeListLLM
         return FakeListLLM(
             responses=[f"Error initializing LLM model: {str(e)}. Please check your API keys and model configuration."]
         )
-
+    
 def get_embeddings_model():
     """
     Get an embeddings model

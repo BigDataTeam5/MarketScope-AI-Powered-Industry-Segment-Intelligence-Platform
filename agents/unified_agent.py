@@ -33,6 +33,7 @@ class UnifiedAgent:
         self.llm = None
         self.agent = None
         self.workflow = None
+        self._registered_tools: List[BaseTool] = []
         
         # Track segments
         self.segments = [
@@ -44,6 +45,10 @@ class UnifiedAgent:
         
         # Initialize tools
         self._initialize()
+    def register_tool(self, tool: BaseTool):
+        """Called by run_all_servers.py to inject converted LangGraph tools."""
+        self._registered_tools.append(tool)
+        logger.info(f"🛠 Registered tool: {tool.name}")
     
     def _initialize(self):
         """Initialize the agent with basic configuration"""
@@ -83,6 +88,9 @@ class UnifiedAgent:
     
     async def _get_tools_from_server(self):
         """Get tools from MCP server and convert to LangGraph tools"""
+        if self._registered_tools:
+            logger.info(f"Using {len(self._registered_tools)} locally registered tools")
+            return self._registered_tools
         try:
             # Ensure we have a client
             client_ok = await self._ensure_mcp_client()

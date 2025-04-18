@@ -5,7 +5,7 @@ import os
 
 # Add root directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from frontend.utils import sidebar
+from frontend.utils import sidebar, get_server_status
 # Set page config to full width
 st.set_page_config(layout="wide")
 
@@ -50,5 +50,42 @@ def show():
         st.info(f"Currently analyzing: **{st.session_state.selected_segment}**")
     else:
         st.warning("Please select a segment from the sidebar to begin analysis.")
+    
+    # Add Server Status component
+    with st.expander("MCP Server Status", expanded=False):
+        st.markdown("### MarketScope MCP Server Status")
+        st.markdown("Check the status of all backend MCP servers that power MarketScope AI:")
+        
+        # Get status of all MCP servers
+        server_status = get_server_status()
+        
+        # Display server status in a clean format
+        for server_name, status in server_status.items():
+            col1, col2 = st.columns([1, 3])
+            with col1:
+                # Display icon based on status
+                if status == "healthy":
+                    st.markdown("✅")
+                elif status == "unhealthy":
+                    st.markdown("⚠️")
+                else:  # unavailable
+                    st.markdown("❌")
+            
+            with col2:
+                # Format server name for display
+                display_name = server_name.replace("_", " ").title()
+                if server_name == "unified":
+                    display_name += " (Main)"
+                
+                if status == "healthy":
+                    st.markdown(f"**{display_name}**: Connected")
+                elif status == "unhealthy":
+                    st.markdown(f"**{display_name}**: Responding but has errors")
+                else:  # unavailable
+                    st.markdown(f"**{display_name}**: Not available")
+        
+        # Add a button to refresh server status
+        if st.button("Refresh Status"):
+            st.experimental_rerun()
 
 show()
