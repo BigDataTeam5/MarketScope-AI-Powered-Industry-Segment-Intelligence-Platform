@@ -229,13 +229,17 @@ class MCPClient:
         return await client.invoke(tool_name, parameters)
     
     def invoke_sync(self, tool_name: str, parameters: Dict[str, Any]) -> Any:
-        """Synchronous version of invoke"""
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        """Synchronous version of invoke that manages its own event loop"""
         try:
-            return loop.run_until_complete(self.invoke(tool_name, parameters))
-        finally:
-            loop.close()
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                return loop.run_until_complete(self.invoke(tool_name, parameters))
+            finally:
+                loop.close()
+        except Exception as e:
+            logger.error(f"Error in invoke_sync for {tool_name}: {str(e)}")
+            return {"status": "error", "message": str(e)}
     
     async def close(self):
         """Close the client"""

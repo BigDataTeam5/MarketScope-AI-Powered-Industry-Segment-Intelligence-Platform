@@ -80,8 +80,18 @@ class UnifiedAgent:
                 from agents.custom_mcp_client import MCPClient
                 # Connect to the unified MCP server on port 8000
                 self.mcp_client = MCPClient("marketscope")
-                logger.info("Created MCP client for the unified server")
-                return True
+                
+                # Test the connection
+                try:
+                    # Try a simple health check request
+                    health_status = await self.mcp_client.invoke_sync("health_check", {}) if hasattr(self.mcp_client, "invoke_sync") else {"status": "ok"}
+                    logger.info("Created MCP client for the unified server")
+                    return True
+                except Exception as conn_error:
+                    logger.warning(f"MCP client created but connection test failed: {str(conn_error)}")
+                    # Continue anyway as the server might be starting up
+                    return True
+                    
             except Exception as e:
                 logger.error(f"Failed to create MCP client: {str(e)}")
                 return False
@@ -342,87 +352,181 @@ class UnifiedAgent:
             # Create appropriate system message
             system_message = self._get_system_message(segment, use_case)
             
+            # First try with direct LangChain integration
             try:
                 from langchain_core.prompts import ChatPromptTemplate
                 from langchain_core.runnables import RunnablePassthrough
-                from langchain.agents.format_scratchpad.tools import format_to_tool_messages
-                from langchain.agents.output_parsers.tools import ToolsAgentOutputParser
-                from langchain_core.messages import AIMessage
-
-                # Create proper LangChain-compatible LLM
-                class LangChainCompatibleLLM:
-                    def __init__(self, llm):
-                        self.llm = llm
-                        
-                    def invoke(self, messages, **kwargs):
-                        try:
-                            # Properly handle both direct calls and chain calls
-                            if isinstance(messages, list):
-                                result = self.llm(messages)
-                            else:
-                                result = self.llm([{"role": "user", "content": messages}])
-                                
-                            if isinstance(result, dict):
-                                return result
-                            elif isinstance(result, str):
-                                return AIMessage(content=result)
-                            else:
-                                return {"type": "assistant", "content": str(result)}
-                                
-                        except Exception as e:
-                            logger.error(f"LLM invoke error: {str(e)}")
-                            return AIMessage(content="I encountered an error processing your request.")
-                            
-                    def bind_tools(self, tools):
-                        """Support tool binding for older LangChain versions"""
-                        return self
-
-                # Wrap the LLM
-                llm = LangChainCompatibleLLM(self.llm)
+                from langchain_core.messages import AIMessage, SystemMessage
                 
-                # Create the prompt with system message
+                # First check if the LLM is already properly formatted for LangChain
+                if hasattr(self.llm, "bind_tools") or hasattr(self.llm, "invoke"):
+                    # LLM is already compatible
+                    model = self.llm
+                else:
+                    # Create a compatible wrapper
+                    class LangChainAdapter:
+                        def __init__(self, llm):
+                            self.llm = llm
+                        
+                        def invoke(self, input_data, **kwargs):
+                            # Handle different input formats
+                            if isinstance(input_data, list):
+                                # Assume these are messages
+                                return self._process_messages(input_data)
+                            elif isinstance(input_data, dict) and "input" in input_data:
+                                # Handle direct input
+                                return AIMessage(content=self._process_input(input_data["input"]))
+                            else:
+                                # Default handling
+                                return AIMessage(content=self._process_input(str(input_data)))
+                        
+                        def _process_messages(self, messages):
+                            try:
+                                # Convert LangChain messages to the format our LLM expects
+                                formatted_msgs = []
+                                for msg in messages:
+                                    if hasattr(msg, "type") and hasattr(msg, "content"):
+                                        role = "system" if msg.type == "system" else (
+                                               "assistant" if msg.type == "ai" else "user")
+                                        formatted_msgs.append({"role": role, "content": msg.content})
+                                    elif isinstance(msg, dict) and "type" in msg and "content" in msg:
+                                        role = "system" if msg["type"] == "system" else (
+                                               "assistant" if msg["type"] == "ai" else "user")
+                                        formatted_msgs.append({"role": role, "content": msg["content"]})
+                                    else:
+                                        # Fallback for unknown message format
+                                        formatted_msgs.append({"role": "user", "content": str(msg)})
+                                
+                                # Call the underlying LLM
+                                result = self.llm(formatted_msgs)
+                                
+                                # Handle different response formats
+                                if isinstance(result, dict) and "content" in result:
+                                    return AIMessage(content=result["content"])
+                                elif isinstance(result, str):
+                                    return AIMessage(content=result)
+                                else:
+                                    return AIMessage(content=str(result))
+                            except Exception as e:
+                                logger.error(f"Error in LLM adapter: {str(e)}")
+                                return AIMessage(content=f"I encountered an error: {str(e)}")
+                        
+                        def _process_input(self, input_text):
+                            try:
+                                result = self.llm([{"role": "user", "content": input_text}])
+                                if isinstance(result, dict) and "content" in result:
+                                    return result["content"]
+                                return str(result)
+                            except Exception as e:
+                                logger.error(f"Error processing input: {str(e)}")
+                                return f"Error: {str(e)}"
+                    
+                    # Create our adapter
+                    model = LangChainAdapter(self.llm)
+                
+                # Create a LangChain agent
+                from langchain.agents import create_openai_tools_agent
+                from langchain.agents.agent import AgentExecutor
+                
+                # Create a prompt template
                 prompt = ChatPromptTemplate.from_messages([
-                    ("system", system_message),
+                    SystemMessage(content=system_message),
                     ("user", "{input}"),
                     ("assistant", "{agent_scratchpad}")
                 ])
-
-                # Create the agent chain
-                agent_chain = (
-                    RunnablePassthrough.assign(
-                        agent_scratchpad=lambda x: format_to_tool_messages(
-                            x.get("intermediate_steps", [])
-                        )
-                    )
-                    | prompt
-                    | llm
-                    | ToolsAgentOutputParser()
-                )
-
-                self.agent = agent_chain
-                logger.info("Successfully created agent with modern LangChain format")
-                return True
-
-            except Exception as e:
-                logger.error(f"Error setting up modern agent: {str(e)}")
                 
-                # Fall back to basic ReAct agent
+                # Create the agent
+                agent = create_openai_tools_agent(model, tools, prompt)
+                
+                # Create an executor
+                self.agent = AgentExecutor(agent=agent, tools=tools)
+                logger.info("Successfully created LangChain agent")
+                return True
+                
+            except Exception as e:
+                logger.error(f"Error setting up LangChain agent: {str(e)}")
+                
+                # Try with LangGraph's create_react_agent
                 try:
-                    from langgraph.prebuilt import create_react_agent
+                    import langgraph.prebuilt as lg_prebuilt
                     
-                    # Try with simplified params
-                    self.agent = create_react_agent(
-                        llm,
-                        tools,
-                        system_message=system_message
-                    )
+                    class SimpleLLMWrapper:
+                        def __init__(self, llm):
+                            self.llm = llm
+                        
+                        def __call__(self, prompt, **kwargs):
+                            try:
+                                if isinstance(prompt, list):
+                                    # Convert message list to a single string if needed
+                                    prompt_str = "\n".join([
+                                        f"{m.get('role', 'user')}: {m.get('content', '')}" 
+                                        if isinstance(m, dict) else str(m) for m in prompt
+                                    ])
+                                else:
+                                    prompt_str = str(prompt)
+                                    
+                                # Call the underlying LLM
+                                result = self.llm([{"role": "user", "content": prompt_str}])
+                                
+                                # Return in the expected format
+                                if isinstance(result, dict) and "content" in result:
+                                    return result["content"]
+                                elif isinstance(result, str):
+                                    return result
+                                else:
+                                    return str(result)
+                            except Exception as e:
+                                logger.error(f"LLM wrapper error: {str(e)}")
+                                return "I encountered an error processing your request."
                     
-                    logger.info("Successfully created fallback ReAct agent")
+                    # Create a simple wrapper that matches the expected signature
+                    llm_wrapped = SimpleLLMWrapper(self.llm)
+                    
+                    # LangGraph changed the API, adapt to different versions
+                    try:
+                        # First try with new API (post 0.0.15)
+                        self.agent = lg_prebuilt.create_react_agent(
+                            llm=llm_wrapped,
+                            tools=tools,
+                            prompt_template=system_message
+                        )
+                    except Exception as api_error:
+                        logger.warning(f"Newer API failed: {str(api_error)}, trying older API")
+                        # Try with older API
+                        self.agent = lg_prebuilt.create_react_agent(
+                            llm_wrapped,
+                            tools
+                        )
+                    
+                    logger.info("Successfully created LangGraph ReAct agent")
                     return True
                     
-                except Exception as inner_e:
-                    logger.error(f"Fallback agent setup also failed: {str(inner_e)}")
-                    return False
+                except Exception as lg_error:
+                    logger.error(f"LangGraph agent setup also failed: {str(lg_error)}")
+                    
+                    # Last resort: create a very simple agent
+                    class SimpleAgent:
+                        def __init__(self, llm, system_message):
+                            self.llm = llm
+                            self.system_message = system_message
+                        
+                        def invoke(self, input_data):
+                            prompt = f"{self.system_message}\n\nUser: {input_data.get('input', '')}"
+                            try:
+                                result = self.llm([
+                                    {"role": "system", "content": self.system_message},
+                                    {"role": "user", "content": input_data.get('input', '')}
+                                ])
+                                if isinstance(result, dict):
+                                    return result
+                                return {"content": str(result)}
+                            except Exception as e:
+                                logger.error(f"Simple agent error: {str(e)}")
+                                return {"content": "I encountered an error. Please try again with a simpler question."}
+                    
+                    self.agent = SimpleAgent(self.llm, system_message)
+                    logger.info("Created simple fallback agent")
+                    return True
             
         except Exception as e:
             logger.error(f"Error setting up agent: {str(e)}")
