@@ -14,7 +14,8 @@ from fastapi.responses import JSONResponse
 from mcp.server.fastmcp import FastMCP
 import uvicorn
 from typing import Dict, Any, Optional, List, Union
-
+from dotenv import load_dotenv
+load_dotenv(override=True)
 # Add snowflake connector
 import snowflake.connector
 from snowflake.connector.pandas_tools import write_pandas
@@ -36,7 +37,7 @@ except ImportError:
         SNOWFLAKE_PASSWORD = os.getenv("SNOWFLAKE_PASSWORD", "")
         SNOWFLAKE_ACCOUNT = os.getenv("SNOWFLAKE_ACCOUNT", "")
         SNOWFLAKE_WAREHOUSE = os.getenv("SNOWFLAKE_WAREHOUSE", "COMPUTE_WH")
-        SNOWFLAKE_DATABASE = os.getenv("SNOWFLAKE_DATABASE", "HEALTHCARE_INDUSTRY_CUSTOMER_DATA")
+        SNOWFLAKE_DATABASE = "HEALTHCARE_INDUSTRY_CUSTOMER_DATA"
         SNOWFLAKE_ROLE = os.getenv("SNOWFLAKE_ROLE", "ACCOUNTADMIN")
 
 # Create FastAPI app
@@ -99,13 +100,13 @@ def get_snowflake_conn():
             logger.error("Snowflake credentials not set. Please configure the .env file")
             return None
             
+        # Connect without specifying database
         conn = snowflake.connector.connect(
             user=Config.SNOWFLAKE_USER,
             password=Config.SNOWFLAKE_PASSWORD,
             account=Config.SNOWFLAKE_ACCOUNT,
             warehouse=Config.SNOWFLAKE_WAREHOUSE,
-            role=Config.SNOWFLAKE_ROLE,
-            autocommit=True
+            role=Config.SNOWFLAKE_ROLE
         )
         
         # Test connection with a simple query
@@ -316,10 +317,10 @@ def load_csv_to_table(table_name: str, csv_data: str, create_table: bool = True,
             
         # Create schema if needed
         try:
-            # Try to create the schema - explicitly use the current database
-            schema_create_sql = f"CREATE SCHEMA IF NOT EXISTS {Config.SNOWFLAKE_DATABASE}.{schema}"
+            # Simple schema creation command
+            schema_create_sql = f"CREATE SCHEMA IF NOT EXISTS {schema}"
             cursor.execute(schema_create_sql)
-            logger.info(f"Created schema {schema} in database {Config.SNOWFLAKE_DATABASE}")
+            logger.info(f"Created schema {schema}")
             
             # Use the schema
             cursor.execute(f"USE SCHEMA {schema}")
@@ -330,9 +331,7 @@ def load_csv_to_table(table_name: str, csv_data: str, create_table: bool = True,
         
         # Create table if needed
         if create_table:
-            # Generate fully qualified table name
-            full_table_name = f"\"{Config.SNOWFLAKE_DATABASE}\".\"{schema}\".\"{table_name}\""
-            
+            # Create a simple table
             columns = []
             for col_name, dtype in df.dtypes.items():
                 if 'int' in str(dtype):
@@ -344,39 +343,87 @@ def load_csv_to_table(table_name: str, csv_data: str, create_table: bool = True,
                 else:
                     col_type = "VARCHAR"
                     
-                columns.append(f'\"{col_name}\" {col_type}')
+                # Use simple column naming without quotes
+                columns.append(f'"{col_name}" {col_type}')
                 
             columns_str = ", ".join(columns)
-            create_table_sql = f"CREATE TABLE IF NOT EXISTS {full_table_name} ({columns_str})"
+            create_table_sql = f"CREATE TABLE IF NOT EXISTS {table_name} ({columns_str})"
             
             try:
                 cursor.execute(create_table_sql)
-                logger.info(f"Created table {full_table_name}")
+                logger.info(f"Created table {schema}.{table_name}")
             except Exception as e:
                 logger.error(f"Error creating table: {str(e)}")
                 return f"Error creating table: {str(e)}"
         
         # Use Snowflake Pandas connector to write data
         try:
-            # Use the fully qualified table name
-            fully_qualified_table = f"{Config.SNOWFLAKE_DATABASE}.{schema}.{table_name}"
+            # Get a fresh cursor for this operation
+            cursor = conn.cursor()
             
-            # Success! We are using a real connection
-            success, nchunks, nrows, _ = write_pandas(conn, df, table_name, schema, database=Config.SNOWFLAKE_DATABASE)
+            # Make sure we're using the right database and schema context
+            cursor.execute(f"USE DATABASE {Config.SNOWFLAKE_DATABASE}")
+            cursor.execute(f"USE SCHEMA {schema}")
             
-            if success:
-                return f"Successfully loaded {nrows} rows into table {fully_qualified_table}."
-            else:
-                return f"Failed to load data into {fully_qualified_table}."
+            # Get the current context to confirm
+            cursor.execute("SELECT CURRENT_DATABASE(), CURRENT_SCHEMA()")
+            current_context = cursor.fetchone()
+            logger.info(f"Current context before write_pandas: {current_context[0]}.{current_context[1]}")
+            cursor.close()
+            
+            # Use the built-in pandas DataFrame to_sql method instead of write_pandas
+            conn_cursor = conn.cursor()
+            try:
+                # First truncate the table to avoid duplicates
+                conn_cursor.execute(f"TRUNCATE TABLE IF EXISTS {table_name}")
+                
+                # Now load data row by row
+                for index, row in df.iterrows():
+                    # Create the values string
+                    values = []
+                    for col in df.columns:
+                        value = row[col]
+                        if pd.isna(value):
+                            values.append('NULL')
+                        elif isinstance(value, (int, float)):
+                            values.append(str(value))
+                        else:
+                            # Correctly escape single quotes by doubling them
+                            escaped_value = str(value).replace("'", "''")
+                            values.append(f"'{escaped_value}'")
+                    
+                    # Construct and execute INSERT statement
+                    columns_str = '", "'.join(df.columns)
+                    values_str = ', '.join(values)
+                    insert_sql = f'INSERT INTO {table_name} ("{columns_str}") VALUES ({values_str})'
+                    conn_cursor.execute(insert_sql)
+                
+                # Get count of rows in the table
+                conn_cursor.execute(f"SELECT COUNT(*) FROM {table_name}")
+                count_result = conn_cursor.fetchone()
+                nrows = count_result[0] if count_result else 0
+                
+                logger.info(f"Successfully inserted {nrows} rows into {schema}.{table_name}")
+                return f"Successfully loaded {nrows} rows into table {schema}.{table_name}."
+            except Exception as e:
+                logger.error(f"Error inserting data: {str(e)}")
+                return f"Error inserting data: {str(e)}"
+            finally:
+                conn_cursor.close()
         except Exception as e:
             logger.error(f"Error writing data to Snowflake: {str(e)}")
             return f"Error writing data to Snowflake: {str(e)}"
-        finally:
-            cursor.close()
-            conn.close()
     except Exception as e:
         logger.error(f"Error loading CSV data: {str(e)}")
         return f"Error: {str(e)}"
+    finally:
+        # Close the main connection if it exists
+        if conn is not None:
+            try:
+                conn.close()
+                logger.info("Snowflake connection closed")
+            except Exception as e:
+                logger.error(f"Error closing Snowflake connection: {str(e)}")
 
 @mcp_server.tool()
 def get_table_schema(table_name: str) -> str:
@@ -467,6 +514,17 @@ logger.info("Registered MCP tools: execute_query, load_csv_to_table, get_table_s
 
 # Mount MCP server to FastAPI app
 app.mount("/mcp", mcp_server.sse_app())
+
+# Add direct /tools endpoints for compatibility with older code
+@app.get("/tools")
+async def get_tools_legacy():
+    """Legacy endpoint that redirects to /mcp/tools"""
+    return await get_tools()
+
+@app.post("/tools/{tool_name}/invoke")
+async def invoke_tool_legacy(tool_name: str, parameters: Dict[str, Any]):
+    """Legacy endpoint that redirects to /mcp/tools/{tool_name}/invoke"""
+    return await invoke_tool(tool_name, parameters)
 
 # Add health check endpoint
 @app.get("/health")

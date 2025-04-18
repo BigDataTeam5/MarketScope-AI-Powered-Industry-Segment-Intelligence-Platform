@@ -16,6 +16,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from mcp.server.fastmcp import FastMCP
 import uvicorn
+from dotenv import load_dotenv
+load_dotenv(override=True)
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)

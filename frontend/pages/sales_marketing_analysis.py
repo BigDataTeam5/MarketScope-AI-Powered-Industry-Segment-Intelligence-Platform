@@ -15,6 +15,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import warnings
 import sys
+import logging
 # Suppress warnings
 warnings.filterwarnings('ignore')
 
@@ -110,53 +111,37 @@ async def upload_to_snowflake(df, segment_name):
     # Initialize the Snowflake MCP client - use "snowflake" service directly
     snowflake_mcp_client = None
     try:
-        # Enhanced logging
+        # Minimized logging
         st.info("Connecting to Snowflake MCP server...")
-        print("Connecting to Snowflake MCP server...")
         
         # Create and configure custom client directly to port 8004 to ensure proper connection
         from agents.custom_mcp_client import CustomMCPClient
         snowflake_mcp_client = CustomMCPClient("http://localhost:8004")
-        print(f"Connecting to Snowflake at: http://localhost:8004")
         
         # Check if Snowflake server is available first
         try:
-            # Quick check to see if the server is responding
-            print("Fetching tools from http://localhost:8004/mcp/tools")
-            
             tools = await asyncio.wait_for(snowflake_mcp_client.get_tools(force_refresh=True), timeout=5.0)
             
             if not tools:
-                print("No tools found in response")
                 return {
                     "status": "error",
                     "message": "Snowflake MCP server is not available - no tools found"
                 }
             
-            # Debug: print all tools found
-            print(f"Found {len(tools)} tools:")
-            for t in tools:
-                print(f"- {t.get('name')}: {t.get('description')}")
-            
             # Check if the required tool exists
             tool_exists = any(tool.get("name") == "load_csv_to_table" for tool in tools)
             if not tool_exists:
-                print("load_csv_to_table tool not found in tools list")
                 return {
                     "status": "error",
                     "message": "Snowflake load_csv_to_table tool not available"
                 }
-                
-            print("Required tool 'load_csv_to_table' found!")
             
         except asyncio.TimeoutError:
-            print("Connection to Snowflake MCP server timed out")
             return {
                 "status": "error",
                 "message": "Snowflake MCP server connection timed out"
             }
         except Exception as e:
-            print(f"Error connecting to Snowflake MCP server: {str(e)}")
             return {
                 "status": "error",
                 "message": f"Cannot connect to Snowflake MCP server: {str(e)}"
@@ -168,10 +153,10 @@ async def upload_to_snowflake(df, segment_name):
         csv_string = csv_buffer.getvalue()
         
         # Define table name based on segment
-        table_name = f"SALES_DATA"
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        table_name = f"SALES_DATA_{timestamp}"
         
         # Use Snowflake MCP client to load data
-        print(f"Invoking load_csv_to_table tool with segment: {segment_name}")
         response = await snowflake_mcp_client.invoke("load_csv_to_table", {
             "table_name": table_name,
             "csv_data": csv_string,
@@ -179,14 +164,11 @@ async def upload_to_snowflake(df, segment_name):
             "segment_name": segment_name
         })
         
-        print(f"Snowflake response: {response}")
-        
         return {
             "status": "success" if "Error" not in str(response) else "error",
             "message": str(response)
         }
     except Exception as e:
-        print(f"Snowflake upload error: {str(e)}")
         return {
             "status": "error",
             "message": f"Snowflake upload error: {str(e)}"
@@ -195,25 +177,6 @@ async def upload_to_snowflake(df, segment_name):
         # Ensure client is properly closed to avoid unclosed session warnings
         if snowflake_mcp_client:
             await snowflake_mcp_client.close()
-
-# Function to parse JSON results from queries or return dataframe with error message
-def parse_query_result(result):
-    try:
-        # Check if result is already a DataFrame
-        if isinstance(result, pd.DataFrame):
-            return result
-            
-        # Find where the JSON data begins (after execution time info)
-        json_start = result.find('[')
-        if json_start >= 0:
-            json_data = result[json_start:]
-            return pd.DataFrame(json.loads(json_data))
-        
-        # If no JSON data found, return empty DataFrame with message
-        return pd.DataFrame({"Message": ["No data returned"]})
-    except Exception as e:
-        # Return a DataFrame with the error message
-        return pd.DataFrame({"Error": [f"Error parsing result: {str(e)}"]})
 
 # Function to clean up old CSV files
 def cleanup_old_files():
@@ -242,7 +205,153 @@ def cleanup_old_files():
     except Exception as e:
         st.error(f"Error cleaning up old files: {str(e)}")
 
-# Add sales specific sidebar controls
+# Function to generate analysis
+def generate_analysis(df, segment):
+    """Generate analysis using sales analytics MCP tools and LangGraph"""
+    try:
+        # Setup logging for debugging
+        logging.basicConfig(level=logging.INFO)
+        logger = logging.getLogger("sales_analysis")
+        logger.info(f"Starting analysis for segment: {segment}")
+        
+        # Create MCP client for sales analytics
+        from agents.custom_mcp_client import CustomMCPClient
+        sales_mcp_client = CustomMCPClient("http://localhost:8002")
+        
+        # Initialize analysis result structure
+        analysis_result = {
+            "agent_result": {"status": "success"},
+            "data_tables": {
+                "top_products": pd.DataFrame(),
+                "channels": pd.DataFrame()
+            },
+            "forecasts": {},
+            "charts": {}
+        }
+        
+        # Check server health before proceeding
+        try:
+            health_response = asyncio.run(sales_mcp_client.get("/health"))
+            if not health_response or health_response.get("status") != "healthy":
+                raise Exception("Sales analytics server is not responding")
+        except Exception as e:
+            logger.error(f"Server health check failed: {str(e)}")
+            st.error("⚠️ Unable to connect to analytics server. Please try again.")
+            return None
+            
+        # 1. Basic Sales Analysis
+        try:
+            sales_analysis = asyncio.run(sales_mcp_client.invoke("analyze_sales_data", {
+                "data": df
+            }))
+            
+            if sales_analysis.get("status") == "success":
+                analysis_result["sales_analysis"] = sales_analysis["analysis"]
+                
+                # Convert product performance to DataFrame
+                if "product_performance" in sales_analysis["analysis"]:
+                    product_data = sales_analysis["analysis"]["product_performance"]
+                    analysis_result["data_tables"]["top_products"] = pd.DataFrame(product_data).reset_index()
+                
+                # Convert channel performance to DataFrame
+                if "channel_performance" in sales_analysis["analysis"]:
+                    channel_data = sales_analysis["analysis"]["channel_performance"]
+                    analysis_result["data_tables"]["channels"] = pd.DataFrame(channel_data).reset_index()
+                
+                logger.info("Successfully generated sales analysis")
+        except Exception as e:
+            logger.error(f"Error in sales analysis: {str(e)}")
+            st.error(f"Error analyzing sales data: {str(e)}")
+        
+        # 2. Sales Charts
+        try:
+            # Revenue by product
+            product_chart = asyncio.run(sales_mcp_client.invoke("create_sales_chart", {
+                "metric": "REVENUE",
+                "group_by": "PRODUCT_NAME"
+            }))
+            if product_chart.get("status") == "success":
+                analysis_result["charts"]["products"] = product_chart["chart_data"]
+            
+            # Revenue by channel
+            channel_chart = asyncio.run(sales_mcp_client.invoke("create_sales_chart", {
+                "metric": "REVENUE",
+                "group_by": "SALES_CHANNEL"
+            }))
+            if channel_chart.get("status") == "success":
+                analysis_result["charts"]["channels"] = channel_chart["chart_data"]
+            
+            logger.info("Successfully generated sales charts")
+        except Exception as e:
+            logger.error(f"Error generating charts: {str(e)}")
+            st.error(f"Error generating charts: {str(e)}")
+        
+        # 3. Sales Forecast
+        try:
+            forecast = asyncio.run(sales_mcp_client.invoke("calculate_sales_forecast", {
+                "periods": 6
+            }))
+            if forecast.get("status") == "success":
+                analysis_result["forecasts"]["overall"] = forecast
+                logger.info("Successfully generated sales forecast")
+        except Exception as e:
+            logger.error(f"Error generating forecast: {str(e)}")
+            st.error(f"Error generating forecast: {str(e)}")
+        
+        # Use LangGraph for AI-powered insights
+        try:
+            from langchain.chat_models import ChatOpenAI
+            from langchain.prompts import ChatPromptTemplate
+            from langchain.schema import HumanMessage, SystemMessage
+            from langchain.graphs import Graph
+            
+            # Create a graph of analysis components
+            analysis_graph = Graph()
+            analysis_graph.add_node("sales_analysis", data=analysis_result["sales_analysis"])
+            analysis_graph.add_node("charts", data=analysis_result["charts"])
+            analysis_graph.add_node("forecasts", data=analysis_result["forecasts"])
+            
+            # Generate AI insights
+            llm = ChatOpenAI(temperature=0)
+            template = """Analyze the following sales data for {segment} segment and provide strategic insights:
+            Sales Analysis: {sales_data}
+            Charts: {charts_data}
+            Forecasts: {forecast_data}
+            
+            Provide a detailed analysis covering:
+            1. Key performance indicators (revenue, units sold, profit if available)
+            2. Product performance insights (top and bottom performing products)
+            3. Channel effectiveness (best performing channels)
+            4. Growth trends and forecasts
+            5. Strategic recommendations
+            """
+            
+            prompt = ChatPromptTemplate.from_template(template)
+            messages = prompt.format_messages(
+                segment=segment,
+                sales_data=str(analysis_result["sales_analysis"]),
+                charts_data=str(analysis_result["charts"]),
+                forecast_data=str(analysis_result["forecasts"])
+            )
+            
+            ai_response = llm(messages)
+            analysis_result["agent_result"]["response"] = ai_response.content
+            logger.info("Successfully generated AI insights")
+            
+        except Exception as e:
+            logger.error(f"Error generating AI insights: {str(e)}")
+            analysis_result["agent_result"]["response"] = f"## Sales Analysis for {segment}\n\nThe sales data shows interesting patterns across various products and sales channels."
+            st.error(f"Error generating AI insights: {str(e)}")
+            
+        logger.info("Analysis completed successfully")
+        return analysis_result
+        
+    except Exception as e:
+        logger.error(f"Critical error in generate_analysis: {str(e)}")
+        st.error(f"Error generating analysis: {str(e)}")
+        return None
+
+# Simplified sidebar
 with st.sidebar:
     st.header("Data Options")
     upload_method = st.radio("Select Input Method", ["Upload CSV", "Use Sample Data"])
@@ -269,18 +378,9 @@ with st.sidebar:
         segment_conf = st.checkbox("Confirm Analysis for Segment", value=True)
         if segment_conf:
             st.success(f"Analysis will be for: {selected_segment}")
-            
-            # Only keep the analyze button in the sidebar
-            if st.session_state.get('snowflake_uploaded'):
-                analyze_button = st.button("Generate Analysis", type="primary")
-            else:
-                analyze_button = False
-                st.info("Please upload data first")
         else:
             st.error("Please confirm segment selection before analysis")
-            analyze_button = False
     else:
-        analyze_button = False
         st.error("Please select a segment from the sidebar first")
 
 # Main content area
@@ -310,72 +410,49 @@ if 'sales_data' in st.session_state and st.session_state['sales_data'] is not No
 
 # Handle data upload process (to Snowflake or locally)
 if 'sales_data' in st.session_state and st.session_state['sales_data'] is not None and selected_segment:
-    if st.button("Upload Data", key="upload_data", type="primary"):
-        with st.spinner(f"Uploading data for {selected_segment}..."):
-            # Always save locally first to ensure data is preserved
-            local_result = save_csv_to_local(st.session_state['sales_data'], selected_segment)
-            if local_result["status"] == "success":
-                # Local save was successful, now try to upload to Snowflake
-                st.success(f"✅ Data saved locally for analysis: {local_result['filepath']}")
-                
-                # Attempt Snowflake upload
-                try:
-                    with st.spinner("Connecting to Snowflake..."):
-                        result = asyncio.run(upload_to_snowflake(st.session_state['sales_data'], selected_segment))
+    # Check if we need to show the upload button
+    if not st.session_state.get('snowflake_uploaded'):
+        if st.button("Upload Data", key="upload_data", type="primary"):
+            with st.spinner(f"Uploading data for {selected_segment}..."):
+                # Always save locally first to ensure data is preserved
+                local_result = save_csv_to_local(st.session_state['sales_data'], selected_segment)
+                if local_result["status"] == "success":
+                    # Local save was successful, now try to upload to Snowflake
+                    st.success(f"✅ Data saved locally for analysis: {local_result['filepath']}")
                     
-                    # If Snowflake upload succeeded
-                    if result["status"] == "success" and "Error" not in str(result["message"]) and "Not Found" not in str(result["message"]):
-                        st.session_state['snowflake_uploaded'] = True
-                        st.success("✅ Data also uploaded to Snowflake for advanced analytics!")
-                    else:
-                        # Snowflake upload failed but we already have local storage
+                    # Attempt Snowflake upload
+                    try:
+                        with st.spinner("Connecting to Snowflake..."):
+                            result = asyncio.run(upload_to_snowflake(st.session_state['sales_data'], selected_segment))
+                        
+                        # If Snowflake upload succeeded
+                        if result["status"] == "success" and "Error" not in str(result["message"]) and "Not Found" not in str(result["message"]):
+                            st.session_state['snowflake_uploaded'] = True
+                            st.success("✅ Data also uploaded to Snowflake for advanced analytics!")
+                        else:
+                            # Snowflake upload failed but we already have local storage
+                            st.session_state['snowflake_uploaded'] = True  # Still enable analysis with local data
+                            st.warning(f"Note: Snowflake upload attempt failed: {result['message']}")
+                            st.info("Proceeding with local data analysis instead.")
+                    except Exception as e:
+                        # Snowflake upload exception but we already have local storage
                         st.session_state['snowflake_uploaded'] = True  # Still enable analysis with local data
-                        st.warning(f"Note: Snowflake upload attempt failed: {result['message']}")
-                        st.info("Proceeding with local data analysis instead.")
-                except Exception as e:
-                    # Snowflake upload exception but we already have local storage
-                    st.session_state['snowflake_uploaded'] = True  # Still enable analysis with local data
-                    st.warning(f"Note: Could not connect to Snowflake: {str(e)}")
-                    st.info("Proceeding with local data analysis only.")
-                
-                st.info("You can now click 'Generate Analysis' in the sidebar.")
-            else:
-                # Local save failed
-                st.error(f"Failed to save data: {local_result['message']}")
+                        st.warning(f"Note: Could not connect to Snowflake: {str(e)}")
+                        st.info("Proceeding with local data analysis only.")
+                    
+                    # Show success message and refresh to update UI
+                    st.info("You can now click 'Generate Analysis' below.")
+                else:
+                    # Local save failed
+                    st.error(f"Failed to save data: {local_result['message']}")
 
-# Function to generate analysis
-def generate_analysis(df, segment):
-    """Generate analysis without relying on Snowflake connection"""
-    try:
-        # Create analysis results
-        analysis_result = {
-            "agent_result": {
-                "status": "success",
-                "response": f"## Sales Analysis for {segment}\n\nThe sales data shows interesting patterns across various products and sales channels."
-            },
-            "data_tables": {}
-        }
-        
-        # Top products by revenue
-        top_products = df.groupby('PRODUCT_NAME')['REVENUE'].sum().reset_index().sort_values('REVENUE', ascending=False).head(5)
-        analysis_result['data_tables']['top_products'] = top_products
-        
-        # Sales by channel
-        channels = df.groupby('SALES_CHANNEL').agg({'REVENUE': 'sum', 'PRODUCT_NAME': 'count'}).reset_index()
-        channels = channels.rename(columns={'PRODUCT_NAME': 'TRANSACTION_COUNT'})
-        channels = channels.sort_values('REVENUE', ascending=False)
-        analysis_result['data_tables']['channels'] = channels
-        
-        return analysis_result
-    except Exception as e:
-        st.error(f"Error generating analysis: {str(e)}")
-        return None
-
-# Run analysis when button is clicked
-if analyze_button and st.session_state.get('snowflake_uploaded') and selected_segment:
-    if 'sales_data' in st.session_state and st.session_state['sales_data'] is not None:
+# Display "Generate Analysis" button in the main area once data is uploaded
+if 'snowflake_uploaded' in st.session_state and st.session_state['snowflake_uploaded']:
+    st.success("✅ Your data is ready for analysis!")
+    
+    if st.button("Generate Analysis", type="primary"):
         with st.spinner(f"Analyzing your sales data for {selected_segment}..."):
-            # Generate analysis directly from DataFrame since Snowflake connection might be unreliable
+            # Generate analysis directly from DataFrame
             result = generate_analysis(st.session_state['sales_data'], selected_segment)
             
             if result:
@@ -392,6 +469,8 @@ if analyze_button and st.session_state.get('snowflake_uploaded') and selected_se
                 
                 # Cleanup old files after analysis
                 cleanup_old_files()
+                
+                # Force page refresh to show analysis
             else:
                 st.error("Analysis generation failed.")
 
@@ -529,8 +608,8 @@ if 'analysis_result' in st.session_state and st.session_state['analysis_result']
         plt.tight_layout()
         st.pyplot(fig)
 
-# First-time instructions
-if 'sales_data' not in st.session_state or st.session_state['sales_data'] is None:
+# First-time instructions - only show if no data AND not uploaded yet
+if ('sales_data' not in st.session_state or st.session_state['sales_data'] is None) and not st.session_state.get('snowflake_uploaded', False):
     st.info(f"""
     👆 To analyze your {selected_segment if selected_segment else "healthcare"} sales data:
     1. Select your segment in the sidebar (if not already selected)
