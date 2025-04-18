@@ -22,7 +22,8 @@ class Config:
     # Pinecone Configuration
     PINECONE_API_KEY = os.getenv("PINECONE_API_KEY", "")
     PINECONE_ENV = os.getenv("PINECONE_ENV", "us-east-1")
-    PINECONE_INDEX = "marketscope"
+    PINECONE_INDEX_NAME_book = os.getenv("PINECONE_INDEX_NAME")
+    PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME")  # Add this line for compatibility
     
     # API Keys
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")

@@ -229,17 +229,93 @@ class MCPClient:
         return await client.invoke(tool_name, parameters)
     
     def invoke_sync(self, tool_name: str, parameters: Dict[str, Any]) -> Any:
-        """Synchronous version of invoke that manages its own event loop"""
+        """Synchronous version of invoke that safely handles event loops"""
         try:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+            # Special case for query_marketing_book due to event loop issues
+            if tool_name == "query_marketing_book":
+                return self._invoke_marketing_book_directly(parameters)
+                
+            # Check if we're already in an event loop
             try:
-                return loop.run_until_complete(self.invoke(tool_name, parameters))
-            finally:
-                loop.close()
+                loop = asyncio.get_running_loop()
+                # If we get here, we're in an event loop, use ThreadPoolExecutor to avoid conflicts
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    future = pool.submit(self._run_in_new_loop, self.invoke, tool_name, parameters)
+                    try:
+                        return future.result(timeout=30)  # 30-second timeout
+                    except concurrent.futures.TimeoutError:
+                        logger.warning(f"Timeout invoking {tool_name} in separate thread")
+                        return {"status": "error", "message": f"Timeout invoking {tool_name}"}
+            except RuntimeError:
+                # No running event loop, we can safely create one
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    return loop.run_until_complete(self.invoke(tool_name, parameters))
+                finally:
+                    loop.close()
         except Exception as e:
             logger.error(f"Error in invoke_sync for {tool_name}: {str(e)}")
             return {"status": "error", "message": str(e)}
+            
+    def _run_in_new_loop(self, coro_func, *args, **kwargs):
+        """Run a coroutine function in a new event loop in the current thread"""
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            return loop.run_until_complete(coro_func(*args, **kwargs))
+        finally:
+            loop.close()
+            
+    def _invoke_marketing_book_directly(self, parameters: Dict[str, Any]) -> Any:
+        """Directly invoke the marketing book query endpoint without asyncio to avoid event loop issues"""
+        try:
+            import requests
+            import json
+            
+            # Prepare request payload
+            payload = {
+                "name": "query_marketing_book",
+                "parameters": parameters
+            }
+            
+            # Try both endpoint patterns
+            endpoints = [
+                f"{self.service_url}/tools/query_marketing_book/invoke",
+                f"{self.service_url}/mcp/tools/query_marketing_book/invoke"
+            ]
+            
+            for endpoint in endpoints:
+                try:
+                    logger.info(f"Directly invoking marketing book query at: {endpoint}")
+                    response = requests.post(
+                        endpoint, 
+                        json=payload,
+                        timeout=30,
+                        headers={"Content-Type": "application/json"}
+                    )
+                    
+                    if response.status_code == 200:
+                        result = response.json()
+                        return result.get("content", result)
+                except Exception as e:
+                    logger.warning(f"Error with endpoint {endpoint}: {str(e)}")
+                    continue
+            
+            # If we get here, both attempts failed
+            logger.error("All direct invocation attempts for marketing book query failed")
+            
+            # Return a graceful fallback response
+            return {
+                "status": "error", 
+                "chunks": [],
+                "message": "Failed to query marketing book service. Using fallback chunks."
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in direct marketing book invocation: {str(e)}")
+            return {"status": "error", "message": str(e), "chunks": []}
     
     async def close(self):
         """Close the client"""

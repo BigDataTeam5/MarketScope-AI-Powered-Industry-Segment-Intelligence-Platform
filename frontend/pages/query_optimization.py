@@ -18,7 +18,6 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 from config.config import Config
 from frontend.utils import sidebar
 from agents.unified_agent import unified_agent
-# from mcp_servers.snowflake_mcp_server import SnowflakeMCPServer
 
 # Set page config to full width
 st.set_page_config(
@@ -103,6 +102,96 @@ async def get_sales_data(segment: str) -> pd.DataFrame:
         st.error(f"Error fetching sales data: {str(e)}")
         return pd.DataFrame()
 
+async def query_marketing_knowledge(question: str, segment: str = None, top_k: int = 3) -> Dict:
+    """
+    Query Philip Kotler's Marketing Management book for relevant content chunks and 
+    generate a comprehensive report using the LiteLLM model.
+    """
+    try:
+        st.info("Retrieving relevant marketing content...")
+
+        # Import required dependencies
+        from agents.custom_mcp_client import MCPClient
+        from config.litellm_service import get_llm_model
+
+        # Create a direct connection to the market_analysis service
+        market_analysis_client = MCPClient("market_analysis")
+
+        # Query the marketing book using the client
+        query_result = market_analysis_client.invoke_sync(
+            "query_marketing_book",
+            {"query": question, "top_k": top_k}
+        )
+
+        # Process the query result
+        chunks = []
+        chunk_ids = []
+
+        if query_result and isinstance(query_result, dict) and "chunks" in query_result:
+            chunks = query_result.get("chunks", [])
+            for chunk in chunks:
+                if isinstance(chunk, dict) and "content" in chunk:
+                    chunk_ids.append(chunk.get("chunk_id", "unknown"))
+
+        # If no chunks were found, inform the user
+        if not chunks:
+            st.error("No relevant marketing content found. Please try a different query.")
+            return {"status": "error", "response": "No relevant content found."}
+
+        # Format chunk content for the LLM
+        chunk_content = "\n\n".join([chunk.get("content", "") for chunk in chunks])
+
+        # Generate report using the LiteLLM model
+        st.info("Generating comprehensive marketing report...")
+
+        # Get the LiteLLM model
+        llm = get_llm_model()
+
+        # Prepare the prompt for the LLM
+        segment_context = f"for the {segment} segment" if segment else ""
+        prompt = f"""
+        Based on the following excerpts from Philip Kotler's Marketing Management book, 
+        provide a comprehensive answer to this question: "{question}" {segment_context}.
+        
+        EXCERPTS FROM MARKETING MANAGEMENT:
+        {chunk_content}
+        
+        Please provide a well-structured professional report with:
+        1. A concise executive summary
+        2. Key marketing concepts explained clearly
+        3. Practical applications for {segment if segment else "businesses"}
+        4. Strategic recommendations based on Kotler's insights
+        5. Clear section headings for readability
+        
+        Format your response as a professional business report without mentioning "chunks" or raw data sources in the main text.
+        """
+
+        # Call the LiteLLM model using the correct method
+        response = llm.completion(
+            prompt=prompt,
+            max_tokens=1000,
+            temperature=0.7
+        )
+
+        # Extract the content from the response
+        final_response = response.get("choices", [{}])[0].get("text", "").strip()
+
+        # Add source references at the end if not already present
+        if not any(f"Source {i+1}" in final_response for i in range(len(chunk_ids))):
+            final_response += "\n\n## References\n"
+            for i, chunk_id in enumerate(chunk_ids):
+                final_response += f"Source {i+1}: {chunk_id}\n"
+
+        return {
+            "status": "success",
+            "response": final_response,
+            "chunk_ids": chunk_ids
+        }
+
+    except Exception as e:
+        st.error(f"Error processing marketing query: {str(e)}")
+        return {"status": "error", "response": f"Failed to process marketing query: {str(e)}"}
+    
 def show():
     """Show the query optimization page"""
     sidebar()
@@ -153,36 +242,20 @@ def show():
         # Process search when button is clicked
         if search_button and user_query:
             with st.spinner("Searching for relevant marketing knowledge..."):
-                search_query = f"Query Philip Kotler's Marketing Management book for: {user_query}"
-                
-                # Fetch sales context if needed
-                context_data = None
-                if use_context:
-                    df = asyncio.run(get_sales_data(segment))
-                    if not df.empty:
-                        context_data = {
-                            "sales_data": df.to_dict(orient="records"),
-                            "metrics": {
-                                "total_revenue": df["revenue"].sum(),
-                                "avg_margin": df["estimated_margin_pct"].mean(),
-                                "top_products": df.groupby("product_name")["revenue"].sum().nlargest(3).to_dict()
-                            }
-                        }
-                
-                # Execute search asynchronously
+                # Use our new specialized function that directly connects to the query_marketing_book tool
                 try:
-                    result = asyncio.run(process_marketing_query(
-                        search_query, 
-                        segment,
-                        use_context=use_context,
-                        context_data=context_data
+                    # Execute search asynchronously using the specialized marketing knowledge function
+                    result = asyncio.run(query_marketing_knowledge(
+                        question=user_query,
+                        segment=segment,
+                        top_k=5  # Get top 5 chunks for comprehensive coverage
                     ))
                     
                     if result and result.get("status") == "success":
                         st.session_state['search_result'] = result
-                        st.success("Found relevant marketing knowledge!")
+                        st.success("✅ Found relevant marketing knowledge!")
                     else:
-                        st.error("Search failed. Please try again or rephrase your question.")
+                        st.error(f"❌ Search failed: {result.get('response', 'Unknown error')}")
                 except Exception as e:
                     st.error(f"Error during search: {str(e)}")
         
@@ -202,22 +275,29 @@ def show():
             chunk_ids = re.findall(chunk_pattern, response_text)
             sources = re.findall(source_pattern, response_text)
             
-            # Clean up the response text if needed
+            # Clean up the response text - remove the chunk IDs from the main report
             clean_response = response_text
             if chunk_ids:
-                clean_response = re.sub(r"\nChunk ID: [A-Za-z0-9-]+", "", response_text)
+                # Remove the chunk ID lines and any "References" section at the end
+                clean_response = re.sub(r"\n+## References\s*\n+Chunk ID: [A-Za-z0-9-]+(\n+Chunk ID: [A-Za-z0-9-]+)*", "", response_text)
+                clean_response = re.sub(r"\nChunk ID: [A-Za-z0-9-]+", "", clean_response)
             
-            st.markdown("### Search Results")
+            # Format the report with professional styling
+            st.markdown("## Marketing Knowledge Report")
+            st.markdown("---")
             st.markdown(clean_response)
             
-            # Show source sections in expandable areas
-            if chunk_ids:
-                with st.expander("View Source Chunks"):
-                    for chunk_id in chunk_ids:
-                        st.markdown(f"**Chunk ID:** {chunk_id}")
-            
-            if sources:
-                with st.expander("View Related Sources"):
+            # Move source information to an expandable section at the bottom
+            with st.expander("View Source Information"):
+                st.markdown("### Referenced Sources")
+                if chunk_ids:
+                    for i, chunk_id in enumerate(chunk_ids):
+                        st.markdown(f"**Source {i+1}:** {chunk_id}")
+                else:
+                    st.markdown("No specific sources referenced.")
+                    
+                if sources:
+                    st.markdown("### Related Materials")
                     for title, url in sources:
                         st.markdown(f"- [{title}]({url})")
     
@@ -322,7 +402,7 @@ def show():
             
             # Check if there are sections to display
             sections = response_text.split("##")
-            if len(sections) > 1:
+            if len(sections > 1):
                 # Display executive summary first
                 st.markdown(sections[0])
                 

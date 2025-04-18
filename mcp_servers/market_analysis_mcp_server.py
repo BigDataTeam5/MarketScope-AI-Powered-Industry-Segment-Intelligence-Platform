@@ -7,12 +7,13 @@ import json
 import boto3
 from openai import OpenAI
 import logging
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Body
 from fastapi.middleware.cors import CORSMiddleware
 from mcp.server.fastmcp import FastMCP
 import uvicorn
 from typing import Dict, Any, List, Optional, Union
 from langsmith import traceable
+from pydantic import BaseModel
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -299,6 +300,34 @@ def query_marketing_book(query: str, top_k: int = 3) -> Dict[str, Any]:
 
 # Mount MCP server to FastAPI app
 app.mount("/mcp", mcp_server.sse_app())
+
+# Add direct endpoints for critical tools to ensure accessibility
+class ToolRequest(BaseModel):
+    name: str
+    parameters: Dict[str, Any]
+
+@app.post("/tools/query_marketing_book/invoke")
+async def direct_query_marketing_book(request: Request):
+    """Direct endpoint for query_marketing_book tool to ensure accessibility"""
+    try:
+        # Parse the JSON request body manually
+        json_data = await request.json()
+        
+        # Extract parameters from request
+        parameters = json_data.get("parameters", {})
+        query = parameters.get("query", "")
+        top_k = parameters.get("top_k", 3)
+        
+        logger.info(f"Direct endpoint received query: {query}, top_k: {top_k}")
+        
+        # Call the actual tool function
+        result = query_marketing_book(query, top_k)
+        
+        # Return in the expected format
+        return {"content": result}
+    except Exception as e:
+        logger.error(f"Error in direct_query_marketing_book endpoint: {str(e)}", exc_info=True)
+        return {"content": {"status": "error", "message": str(e)}}
 
 # Add health check endpoint
 @app.get("/health")

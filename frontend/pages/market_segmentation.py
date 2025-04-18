@@ -41,7 +41,7 @@ def show():
     """)
     
     # Create tabs for different functionalities
-    tab1, tab2, tab3 = st.tabs(["Segment Analysis", "Product Trends Visualization", "Data Upload"])
+    tab1, tab2= st.tabs(["Segment Analysis", "Product Trends Visualization"])
     
     with tab1:
         # Example segmentation form
