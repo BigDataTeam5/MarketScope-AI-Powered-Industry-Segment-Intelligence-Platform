@@ -84,12 +84,20 @@ MarketScope includes a Retrieval Augmented Generation (RAG) system that provides
 3. The system will retrieve relevant sections from the book
 4. Get tailored marketing strategies for your specific segment
 
+## Deployed Links:
+-## MCP SERVER:
+- unified server - http://34.42.74.104:8000/docs
+- marketing analysis server - http://34.42.74.104:8001/docs
+- snowflake mcp server - http://34.42.74.104:8004/docs
+- sales data analysis server - http://34.42.74.104:8002/docs
+- segment mcp server - http://34.42.74.104:8003/docs
+
 ## Troubleshooting
 
 If you encounter issues:
 
 - Check that all required dependencies are installed
-- Verify that no other applications are using the required ports (8000, 8001, 8501)
+- Verify that no other applications are using the required ports (8000-8004, 8501)
 - Ensure your environment variables are properly set up
 - Check the application logs for specific error messages
 
