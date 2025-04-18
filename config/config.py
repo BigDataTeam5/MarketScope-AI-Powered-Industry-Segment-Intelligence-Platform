@@ -26,7 +26,7 @@ class Config:
     PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME")  # Add this line for compatibility
     
     # API Keys
-    OPENAI_API_KEY = "your-openai-api-key"  # Replace with your actual key
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
     ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
     GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
     GROK_API_KEY = os.getenv("GROK_API_KEY")

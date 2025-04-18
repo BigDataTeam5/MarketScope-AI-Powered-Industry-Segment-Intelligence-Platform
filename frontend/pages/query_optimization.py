@@ -112,7 +112,6 @@ async def query_marketing_knowledge(question: str, segment: str = None, top_k: i
 
         # Import required dependencies
         from agents.custom_mcp_client import MCPClient
-        from config.litellm_service import get_llm_model
 
         # Create a direct connection to the market_analysis service
         market_analysis_client = MCPClient("market_analysis")
@@ -122,6 +121,9 @@ async def query_marketing_knowledge(question: str, segment: str = None, top_k: i
             "query_marketing_book",
             {"query": question, "top_k": top_k}
         )
+        
+        # Store the query_result in session_state for later use when displaying sources
+        st.session_state['last_query_result'] = query_result
 
         # Process the query result
         chunks = []
@@ -144,9 +146,6 @@ async def query_marketing_knowledge(question: str, segment: str = None, top_k: i
         # Generate report using the LiteLLM model
         st.info("Generating comprehensive marketing report...")
 
-        # Get the LiteLLM model
-        llm = get_llm_model()
-
         # Prepare the prompt for the LLM
         segment_context = f"for the {segment} segment" if segment else ""
         prompt = f"""
@@ -166,15 +165,48 @@ async def query_marketing_knowledge(question: str, segment: str = None, top_k: i
         Format your response as a professional business report without mentioning "chunks" or raw data sources in the main text.
         """
 
-        # Call the LiteLLM model using the correct method
-        response = llm.completion(
-            prompt=prompt,
-            max_tokens=1000,
-            temperature=0.7
-        )
-
-        # Extract the content from the response
-        final_response = response.get("choices", [{}])[0].get("text", "").strip()
+        # Use direct litellm.completion instead of the wrapper to avoid compatibility issues
+        try:
+            import litellm
+            
+            # Direct litellm call using the older API style that works with your version
+            response = litellm.completion(
+                model=Config.DEFAULT_MODEL if hasattr(Config, 'DEFAULT_MODEL') else "gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": "You are a marketing expert specializing in professional report generation."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.7,
+                max_tokens=1000
+            )
+            
+            # Extract content from the response
+            if response and hasattr(response, 'choices') and len(response.choices) > 0:
+                if hasattr(response.choices[0], 'message') and hasattr(response.choices[0].message, 'content'):
+                    final_response = response.choices[0].message.content.strip()
+                else:
+                    # Fallback in case the response structure is different
+                    final_response = str(response.choices[0]).strip()
+            else:
+                final_response = "Error: No response generated from the language model."
+                
+        except Exception as llm_error:
+            st.error(f"Error generating marketing report: {str(llm_error)}")
+            # Provide fallback content instead of completely failing
+            final_response = f"""
+            # Marketing Analysis for {question}
+            
+            ## Error Generating Full Report
+            
+            There was an error generating the complete marketing analysis using the language model.
+            However, the system successfully found relevant content from Kotler's Marketing Management book.
+            
+            ### Retrieved Marketing Content:
+            
+            {chunk_content[:500]}... [Content truncated]
+            
+            Please try again later or contact support for assistance.
+            """
 
         # Add source references at the end if not already present
         if not any(f"Source {i+1}" in final_response for i in range(len(chunk_ids))):
@@ -275,11 +307,16 @@ def show():
             chunk_ids = re.findall(chunk_pattern, response_text)
             sources = re.findall(source_pattern, response_text)
             
+            # Get the referenced chunks directly from the result
+            if "chunk_ids" in result:
+                chunk_ids = result["chunk_ids"]
+            
             # Clean up the response text - remove the chunk IDs from the main report
             clean_response = response_text
             if chunk_ids:
                 # Remove the chunk ID lines and any "References" section at the end
                 clean_response = re.sub(r"\n+## References\s*\n+Chunk ID: [A-Za-z0-9-]+(\n+Chunk ID: [A-Za-z0-9-]+)*", "", response_text)
+                clean_response = re.sub(r"\nSource \d+: [A-Za-z0-9_-]+", "", clean_response)
                 clean_response = re.sub(r"\nChunk ID: [A-Za-z0-9-]+", "", clean_response)
             
             # Format the report with professional styling
@@ -287,10 +324,58 @@ def show():
             st.markdown("---")
             st.markdown(clean_response)
             
+            # Try to get the actual chunks content
+            chunk_contents = []
+            try:
+                # Get chunks from the query result if available
+                if 'last_query_result' in st.session_state and isinstance(st.session_state['last_query_result'], dict):
+                    query_result = st.session_state['last_query_result']
+                    if "chunks" in query_result:
+                        chunks = query_result.get("chunks", [])
+                        for chunk in chunks:
+                            if isinstance(chunk, dict) and "content" in chunk:
+                                chunk_contents.append({
+                                    "id": chunk.get("chunk_id", "unknown"),
+                                    "content": chunk.get("content", "No content available")
+                                })
+            except NameError:
+                # If query_result is not defined, try to fetch chunks again
+                try:
+                    # Create a direct connection to get the chunks
+                    from agents.custom_mcp_client import MCPClient
+                    market_analysis_client = MCPClient("market_analysis")
+                    for chunk_id in chunk_ids:
+                        try:
+                            chunk_content = market_analysis_client.invoke_sync(
+                                "fetch_s3_chunk",
+                                {"chunk_id": chunk_id}
+                            )
+                            if chunk_content and not isinstance(chunk_content, str):
+                                chunk_contents.append({"id": chunk_id, "content": str(chunk_content)})
+                            elif chunk_content:
+                                chunk_contents.append({"id": chunk_id, "content": chunk_content})
+                        except Exception as chunk_error:
+                            st.warning(f"Could not fetch content for chunk {chunk_id}: {str(chunk_error)}")
+                except Exception as e:
+                    st.warning(f"Could not fetch chunk contents: {str(e)}")
+            
             # Move source information to an expandable section at the bottom
             with st.expander("View Source Information"):
                 st.markdown("### Referenced Sources")
-                if chunk_ids:
+                
+                # Display chunks with their content if available
+                if chunk_contents:
+                    for i, chunk_data in enumerate(chunk_contents):
+                        st.markdown(f"**Source {i+1}:** {chunk_data['id']}")
+                        st.text_area(
+                            f"Content from {chunk_data['id']}", 
+                            value=chunk_data['content'],
+                            height=200,
+                            disabled=True,
+                            key=f"source_content_{i}"
+                        )
+                        st.markdown("---")  # Add a separator between sources
+                elif chunk_ids:
                     for i, chunk_id in enumerate(chunk_ids):
                         st.markdown(f"**Source {i+1}:** {chunk_id}")
                 else:

@@ -1,3 +1,8 @@
+import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv(override=True)
 """
 Market Analysis MCP Server
 Provides tools for market analysis and segment strategies using
@@ -22,8 +27,23 @@ logger = logging.getLogger("market_analysis_mcp_server")
 # Import configuration
 from config.config import Config
 
-# Initialize OpenAI client
-openai_client = OpenAI(api_key=Config.OPENAI_API_KEY)
+
+
+
+# Get the OpenAI API key directly from environment variable
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+if not OPENAI_API_KEY:
+    logger.warning("OPENAI_API_KEY not found in environment variables! Using Config fallback.")
+    OPENAI_API_KEY = Config.OPENAI_API_KEY
+
+# Log the API key status (partial key for security)
+if OPENAI_API_KEY:
+    masked_key = OPENAI_API_KEY[:4] + "*****" + OPENAI_API_KEY[-4:] if len(OPENAI_API_KEY) > 8 else "*****"
+    logger.info(f"Using OpenAI API key: {masked_key}")
+else:
+    logger.error("No OpenAI API key found! API calls will fail.")
+# Initialize OpenAI client with explicit API key
+openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
 # Create FastAPI app
 app = FastAPI(title="Market Analysis MCP Server")
@@ -68,7 +88,7 @@ def pinecone_search(query: str, top_k: int = 3) -> Union[List[str], Dict[str, st
         
         # Initialize Pinecone with the updated API
         pc = Pinecone(api_key=Config.PINECONE_API_KEY)
-        index_name = Config.PINECONE_INDEX_NAME
+        index_name = "healthcare-product-analytics"
         
         # Print debug info
         logger.info(f"Searching Pinecone index: {index_name}")
@@ -328,6 +348,126 @@ async def direct_query_marketing_book(request: Request):
     except Exception as e:
         logger.error(f"Error in direct_query_marketing_book endpoint: {str(e)}", exc_info=True)
         return {"content": {"status": "error", "message": str(e)}}
+
+# Add an explicit endpoint at the MCP server path to ensure both endpoint patterns work
+@app.post("/mcp/tools/query_marketing_book/invoke")
+async def mcp_direct_query_marketing_book(request: Request):
+    """MCP path direct endpoint for query_marketing_book to match client expectations"""
+    # Reuse the same implementation as the non-mcp path
+    return await direct_query_marketing_book(request)
+
+@app.post("/direct/query_marketing_content")
+async def direct_query_marketing_content(query: str, top_k: int = 3):
+    """Direct endpoint for querying marketing content with OpenAI embeddings"""
+    try:
+        logger.info(f"Query marketing content for: {query}")
+        
+        # Get embeddings for the query using OpenAI (1536 dimensions)
+        response = openai_client.embeddings.create(
+            model="text-embedding-ada-002",
+            input=[query]
+        )
+        query_embedding = response.data[0].embedding
+        
+        # Use updated Pinecone import
+        from pinecone import Pinecone
+        
+        # Initialize Pinecone with the updated API
+        pc = Pinecone(api_key=Config.PINECONE_API_KEY)
+        index_name = "healthcare-product-analytics"
+        
+        logger.info(f"Querying Pinecone index: {index_name} for marketing content")
+        
+        # Get the index
+        index = pc.Index(index_name)
+        
+        # Search Pinecone using "book-kotler" namespace - the only namespace available based on the dashboard
+        results = index.query(
+            vector=query_embedding,
+            top_k=top_k,
+            include_metadata=True,
+            namespace="book-kotler"
+        )
+        
+        # Check if we have results
+        if not results.matches or len(results.matches) == 0:
+            logger.warning(f"No marketing content found for query: {query}")
+            return {
+                "status": "error",
+                "message": "No relevant marketing content found. Please try a different query."
+            }
+        
+        # Extract and process results
+        content_chunks = []
+        for match in results.matches:
+            if hasattr(match, 'metadata') and match.metadata:
+                # Get content from the chunk
+                content = match.metadata.get('text', 'No content available')
+                source = match.id  # Using chunk ID as source reference
+                content_chunks.append({
+                    "content": content,
+                    "source": source,
+                    "score": float(match.score)
+                })
+        
+        # Prepare response
+        return {
+            "status": "success",
+            "query": query,
+            "chunks": content_chunks,
+            "chunks_found": len(content_chunks)
+        }
+    except Exception as e:
+        logger.error(f"Error querying marketing content: {str(e)}")
+        return {
+            "status": "error",
+            "message": f"Error retrieving marketing content: {str(e)}"
+        }
+
+# Add a simple direct API endpoint for marketing book queries that won't time out
+@app.get("/api/marketing/query")
+async def simple_marketing_query(query: str, top_k: int = 5):
+    """
+    Simple, direct endpoint for marketing book queries that returns plaintext results.
+    This endpoint is designed for maximum reliability and avoids timeout issues.
+    """
+    try:
+        logger.info(f"Simple marketing query: {query}, top_k: {top_k}")
+        
+        # First, search for relevant chunks using the existing function
+        chunk_ids = pinecone_search(query, top_k=top_k)
+        
+        if not isinstance(chunk_ids, list) or not chunk_ids or chunk_ids[0].startswith("Error"):
+            return {"status": "error", "message": "No relevant content found"}
+            
+        # Fetch chunks one by one
+        chunks = []
+        for chunk_id in chunk_ids:
+            try:
+                chunk_content = fetch_s3_chunk(chunk_id)
+                if not chunk_content.startswith("Error"):
+                    chunks.append({
+                        "id": chunk_id,
+                        "content": chunk_content[:500] + "..." if len(chunk_content) > 500 else chunk_content
+                    })
+            except Exception as chunk_error:
+                logger.error(f"Error fetching chunk {chunk_id}: {str(chunk_error)}")
+                continue
+                
+        if not chunks:
+            return {"status": "error", "message": "Failed to fetch chunks"}
+            
+        # Return a simplified response to avoid any serialization issues
+        return {
+            "status": "success",
+            "query": query,
+            "results": chunks,
+            "count": len(chunks)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in simple marketing query: {str(e)}")
+        return {"status": "error", "message": f"Server error: {str(e)}"}
 
 # Add health check endpoint
 @app.get("/health")

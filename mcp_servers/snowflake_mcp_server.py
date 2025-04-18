@@ -66,21 +66,41 @@ mcp_server = FastMCP("snowflake")
 # Helper function to map segment names to schema names
 def get_schema_for_segment(segment_name):
     """Map segment name to appropriate Snowflake schema"""
-    # Use schema names from Config
-    if segment_name in Config.SEGMENT_CONFIG:
-        return Config.SEGMENT_CONFIG[segment_name]["schema"]
+    if not segment_name:
+        return "PUBLIC"
         
-    # Fallback mapping
+    # Normalize segment name to handle various formats
+    normalized_name = segment_name.strip().lower()
+    
+    # Use schema names from Config if available
+    if hasattr(Config, 'SEGMENT_CONFIG') and segment_name in Config.SEGMENT_CONFIG:
+        segment_config = Config.SEGMENT_CONFIG[segment_name]
+        if 'schema' in segment_config:
+            return segment_config["schema"]
+    
+    # Fallback mapping for common segments
     mapping = {
-        "Skin Care Segment": "SKINCARE_SEGMENT",
-        "Diagnostic Segment": "DIAGNOSTIC_SEGMENT",
-        "Fitness Wearable Segment": "WEARABLES_SEGMENT",
-        "Supplement Segment": "SUPPLEMENTS_SEGMENT",
-        "Otc Pharmaceutical Segment": "OTC_PHARMA_SEGMENT"
+        "skin care segment": "SKINCARE_SEGMENT",
+        "diagnostic segment": "DIAGNOSTIC_SEGMENT",
+        "fitness wearable segment": "WEARABLES_SEGMENT",
+        "supplement segment": "SUPPLEMENTS_SEGMENT",
+        "otc pharmaceutical segment": "OTC_PHARMA_SEGMENT"
     }
     
-    # Return mapped schema or default to PUBLIC
-    return mapping.get(segment_name, "PUBLIC")
+    # Check against normalized names
+    for key, value in mapping.items():
+        if key in normalized_name or normalized_name in key:
+            return value
+    
+    # When all else fails, convert segment name to a valid schema name
+    # Remove spaces, special chars and capitalize
+    if segment_name:
+        simplified_name = ''.join(c for c in segment_name if c.isalnum() or c == ' ')
+        simplified_name = simplified_name.replace(' ', '_').upper()
+        return simplified_name
+    
+    # Return default schema as last resort
+    return "PUBLIC"
 
 def get_snowflake_conn():
     """

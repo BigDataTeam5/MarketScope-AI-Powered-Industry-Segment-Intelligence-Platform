@@ -9,7 +9,7 @@ def setup_pinecone_index():
     Run this script before starting the Airflow pipeline.
     """
     # Load environment variables
-    load_dotenv()
+    load_dotenv(ovverride=True)
     
     # Initialize Pinecone
     pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))

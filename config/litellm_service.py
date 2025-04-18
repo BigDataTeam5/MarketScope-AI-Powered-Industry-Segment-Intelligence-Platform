@@ -38,7 +38,7 @@ def get_llm_model():
                                 "content": msg.content if hasattr(msg, "content") else str(msg)
                             })
 
-                    # Call LiteLLM
+                    # Call LiteLLM with the original completion function that's available in your version
                     response = litellm.completion(
                         model=self.model,
                         messages=formatted_messages,

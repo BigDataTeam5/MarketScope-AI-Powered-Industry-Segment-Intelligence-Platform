@@ -7,7 +7,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Add root directory to path for imports
 from frontend.utils import sidebar, get_server_status
-from agents.custom_mcp_client import SimpleMCPClient as MCPClient
+from agents.custom_mcp_client import  MCPClient
 
 # Set page config to full width
 st.set_page_config(layout="wide")
@@ -38,70 +38,7 @@ def show():
         segment = st.session_state.selected_segment
         st.info(f"Currently analyzing: **{segment}**")
         
-        # Display market size analysis
-        st.subheader("Market Size Analysis")
-        
-        with st.spinner(f"Analyzing market size for {segment}..."):
-            try:
-                # Initialize MCP client
-                client = MCPClient("http://localhost:8003/mcp")  # Assuming segment server is on port 8003
-                
-                # Check if we already have results or need to fetch them
-                if "market_size_result" not in st.session_state or not st.session_state.market_size_result:
-                    # Call the market size analysis tool
-                    result = client.invoke("analyze_market_size", {"segment": segment})
-                    st.session_state.market_size_result = result
-                else:
-                    result = st.session_state.market_size_result
-                
-                # Check if the call was successful
-                if result.get("status") == "success":
-                    # Display market summary
-                    st.write(result["market_summary"])
-                    
-                    # Display metrics in three columns
-                    col1, col2, col3 = st.columns(3)
-                    
-                    with col1:
-                        st.metric("Total Addressable Market (TAM)", 
-                                  result["market_size"]["TAM"] if result["market_size"]["TAM"] else "Not available")
-                    
-                    with col2:
-                        st.metric("Serviceable Available Market (SAM)", 
-                                  result["market_size"]["SAM"] if result["market_size"]["SAM"] else "Not available")
-                    
-                    with col3:
-                        st.metric("Serviceable Obtainable Market (SOM)", 
-                                  result["market_size"]["SOM"] if result["market_size"]["SOM"] else "Not available")
-                    
-                    # Display additional information
-                    if "companies_analyzed" in result and result["companies_analyzed"]:
-                        st.subheader("Companies Analyzed")
-                        st.write(", ".join(result["companies_analyzed"]))
-                    
-                    if "sources" in result and result["sources"]:
-                        st.subheader("Data Sources")
-                        for source in result["sources"]:
-                            st.write(f"- {source}")
-                    
-                    # Add refresh button
-                    if st.button("Refresh Analysis"):
-                        st.session_state.market_size_result = None
-                        st.experimental_rerun()
-                        
-                else:
-                    st.error(f"Error analyzing market size: {result.get('message', 'Unknown error')}")
-                    st.button("Retry Analysis", on_click=lambda: setattr(st.session_state, "market_size_result", None))
-                    
-            except Exception as e:
-                st.error(f"Failed to connect to the market analysis service: {str(e)}")
-                st.write("Please check that all services are running correctly and try again.")
-                if st.button("Retry Connection"):
-                    st.session_state.market_size_result = None
-                    st.experimental_rerun()
-    else:
-        # No segment selected
-        st.warning("Please select a segment from the sidebar to begin market size analysis.")
+       
     
     # Add Server Status component
     with st.expander("MCP Server Status", expanded=False):
