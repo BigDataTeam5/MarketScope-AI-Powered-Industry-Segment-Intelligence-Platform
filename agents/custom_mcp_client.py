@@ -7,6 +7,7 @@ import aiohttp
 import asyncio
 from typing import Dict, Any, List, Optional, Union
 import os
+import requests
 
 # Import Config
 try:

@@ -3,9 +3,12 @@ import streamlit as st
 import sys
 import os
 
-# Add root directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Add root directory to path for imports
 from frontend.utils import sidebar, get_server_status
+from agents.custom_mcp_client import SimpleMCPClient as MCPClient
+
 # Set page config to full width
 st.set_page_config(layout="wide")
 
@@ -20,36 +23,85 @@ if "analysis_result" not in st.session_state:
     st.session_state.analysis_result = None
 if "trends_result" not in st.session_state:
     st.session_state.trends_result = None
+if "market_size_result" not in st.session_state:
+    st.session_state.market_size_result = None
+
 
 def show():
-    """Show main app interface"""
+    """Show main app interface with market size analysis"""
     sidebar()
     
-    st.title("Welcome to MarketScope AI")
+    st.title("MarketScope AI - Market Size Analysis")
     
-    st.markdown("""
-    ## AI-Powered Healthcare Market Intelligence Platform
-    
-    MarketScope AI helps you understand and analyze different healthcare market segments 
-    using advanced AI and natural language processing. Select a segment from the sidebar 
-    to get started.
-    
-    ### Features:
-    - Market Segmentation Analysis
-    - Strategic Query Optimization
-    - Product Comparison
-    
-    ### Getting Started:
-    1. Select a healthcare segment from the sidebar
-    2. Navigate to one of our analysis tools
-    3. Enter your query or requirements
-    """)
-    
-    # Display current segment if selected
+    # Check if a segment is selected
     if st.session_state.get("selected_segment"):
-        st.info(f"Currently analyzing: **{st.session_state.selected_segment}**")
+        segment = st.session_state.selected_segment
+        st.info(f"Currently analyzing: **{segment}**")
+        
+        # Display market size analysis
+        st.subheader("Market Size Analysis")
+        
+        with st.spinner(f"Analyzing market size for {segment}..."):
+            try:
+                # Initialize MCP client
+                client = MCPClient("http://localhost:8003/mcp")  # Assuming segment server is on port 8003
+                
+                # Check if we already have results or need to fetch them
+                if "market_size_result" not in st.session_state or not st.session_state.market_size_result:
+                    # Call the market size analysis tool
+                    result = client.invoke("analyze_market_size", {"segment": segment})
+                    st.session_state.market_size_result = result
+                else:
+                    result = st.session_state.market_size_result
+                
+                # Check if the call was successful
+                if result.get("status") == "success":
+                    # Display market summary
+                    st.write(result["market_summary"])
+                    
+                    # Display metrics in three columns
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        st.metric("Total Addressable Market (TAM)", 
+                                  result["market_size"]["TAM"] if result["market_size"]["TAM"] else "Not available")
+                    
+                    with col2:
+                        st.metric("Serviceable Available Market (SAM)", 
+                                  result["market_size"]["SAM"] if result["market_size"]["SAM"] else "Not available")
+                    
+                    with col3:
+                        st.metric("Serviceable Obtainable Market (SOM)", 
+                                  result["market_size"]["SOM"] if result["market_size"]["SOM"] else "Not available")
+                    
+                    # Display additional information
+                    if "companies_analyzed" in result and result["companies_analyzed"]:
+                        st.subheader("Companies Analyzed")
+                        st.write(", ".join(result["companies_analyzed"]))
+                    
+                    if "sources" in result and result["sources"]:
+                        st.subheader("Data Sources")
+                        for source in result["sources"]:
+                            st.write(f"- {source}")
+                    
+                    # Add refresh button
+                    if st.button("Refresh Analysis"):
+                        st.session_state.market_size_result = None
+                        st.experimental_rerun()
+                        
+                else:
+                    st.error(f"Error analyzing market size: {result.get('message', 'Unknown error')}")
+                    st.button("Retry Analysis", on_click=lambda: setattr(st.session_state, "market_size_result", None))
+                    
+            except Exception as e:
+                st.error(f"Failed to connect to the market analysis service: {str(e)}")
+                st.write("Please check that all services are running correctly and try again.")
+                if st.button("Retry Connection"):
+                    st.session_state.market_size_result = None
+                    st.experimental_rerun()
     else:
-        st.warning("Please select a segment from the sidebar to begin analysis.")
+        # No segment selected
+        st.warning("Please select a segment from the sidebar to begin market size analysis.")
     
     # Add Server Status component
     with st.expander("MCP Server Status", expanded=False):
@@ -87,5 +139,6 @@ def show():
         # Add a button to refresh server status
         if st.button("Refresh Status"):
             st.experimental_rerun()
+
 
 show()

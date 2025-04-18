@@ -103,20 +103,20 @@ def check_server_connection(server_key="unified") -> bool:
         
         return False
 
-def get_mcp_server_url(server_key="unified"):
-    """Get the URL for a specific MCP server with verification"""
-    server_info = MCP_SERVERS.get(server_key, MCP_SERVERS["unified"])
+def get_mcp_server_url(segment_name):
+    """Get the URL for a specific segment MCP server"""
+    from config.config import Config
     
-    # Check if the server is available
-    try:
-        response = requests.get(f"{server_info['url']}{server_info['health']}", timeout=1)
-        if response.status_code == 200:
-            return server_info["url"]
-    except:
-        pass
+    # Default port if segment not found
+    default_port = 8014
     
-    # Return the default unified URL if the requested server isn't available
-    return API_URL
+    # Get port from Config
+    port = default_port
+    if hasattr(Config, 'SEGMENT_CONFIG') and segment_name in Config.SEGMENT_CONFIG:
+        port = Config.SEGMENT_CONFIG[segment_name].get('port', default_port)
+    
+    # Map segment names to server URLs
+    return f"http://localhost:{port}"
 
 def extract_response_text(response_data: Any) -> str:
     """Extract the response text from various response formats"""
