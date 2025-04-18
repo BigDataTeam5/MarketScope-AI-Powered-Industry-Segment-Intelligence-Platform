@@ -21,27 +21,36 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 ENV PYTHONPATH=/app
 
-# Copy requirements first (for better caching)
+# Copy requirements file
 COPY requirements.txt ./
 
 # Create frontend requirements file
 RUN echo "# Frontend requirements" > frontend-requirements.txt
-RUN echo "streamlit" >> frontend-requirements.txt
-RUN echo "requests" >> frontend-requirements.txt
-RUN echo "python-dotenv" >> frontend-requirements.txt
-RUN echo "openai" >> frontend-requirements.txt
-RUN echo "pandas" >> frontend-requirements.txt
-RUN echo "numpy" >> frontend-requirements.txt
-RUN echo "scikit-learn" >> frontend-requirements.txt
-RUN echo "pinecone" >> frontend-requirements.txt
-RUN echo "boto3" >> frontend-requirements.txt
-RUN echo "litellm" >> frontend-requirements.txt
+RUN echo "streamlit==1.44.0" >> frontend-requirements.txt
+RUN echo "requests==2.32.0" >> frontend-requirements.txt
+RUN echo "python-dotenv==1.0.0" >> frontend-requirements.txt
+RUN echo "pandas==2.2.0" >> frontend-requirements.txt
+RUN echo "numpy==1.26.0" >> frontend-requirements.txt
+RUN echo "matplotlib==3.8.0" >> frontend-requirements.txt
+RUN echo "plotly==5.18.0" >> frontend-requirements.txt
+RUN echo "scikit-learn==1.4.0" >> frontend-requirements.txt
+RUN echo "litellm==1.17.0" >> frontend-requirements.txt
+RUN echo "snowflake-connector-python==3.6.0" >> frontend-requirements.txt
+RUN echo "fastapi==0.110.0" >> frontend-requirements.txt
+RUN echo "boto3==1.34.0" >> frontend-requirements.txt
+RUN echo "pydantic==1.10.8" >> frontend-requirements.txt
+RUN echo "altair<5" >> frontend-requirements.txt
 
-# Install dependencies using pip
+# Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 RUN pip install --no-cache-dir -r frontend-requirements.txt
 
-# Copy any existing code (this will take whatever is available)
+# Install specific versions to fix compatibility issues
+RUN pip install --no-cache-dir pydantic==1.10.8
+RUN pip install --no-cache-dir pydantic-settings==2.0.3
+RUN pip install --no-cache-dir openai==0.28.1
+
+# Copy everything to the container
 COPY . .
 
 # Create required directories if they don't exist
@@ -87,7 +96,7 @@ RUN find /app -name "*.py" -exec dos2unix {} \; 2>/dev/null || true
 # Optional: Precompile Python files to catch syntax errors
 RUN find /app -name "*.py" | xargs -n1 python -m py_compile 2>/dev/null || true
 
-# Create start_services.sh script
+# Create start_services.sh script with improved Streamlit settings
 RUN echo '#!/bin/bash' > /app/start_services.sh && \
     echo 'echo "Starting MCP servers..."' >> /app/start_services.sh && \
     echo 'python /app/mcp_servers/run_all_servers.py &' >> /app/start_services.sh && \
@@ -104,13 +113,13 @@ RUN echo '#!/bin/bash' > /app/start_services.sh && \
     echo 'ls -la /app/frontend' >> /app/start_services.sh && \
     echo '' >> /app/start_services.sh && \
     echo 'echo "Starting Streamlit frontend..."' >> /app/start_services.sh && \
-    echo 'cd /app/frontend && streamlit run app.py --server.port=8501 --server.address=0.0.0.0' >> /app/start_services.sh
+    echo 'cd /app/frontend && streamlit run app.py --server.port=8501 --server.address=0.0.0.0 --server.enableCORS=false --server.enableXsrfProtection=false' >> /app/start_services.sh
 
 # Make the script executable
 RUN chmod +x /app/start_services.sh
 
-# Expose backend service ports (MCP + optional APIs)
-EXPOSE 8000 8001 8010 8011 8012 8013 8014 8501
+# Expose all necessary ports
+EXPOSE 8000 8001 8002 8003 8004 8005 8006 8007 8008 8009 8010 8011 8012 8013 8014 8015 8501
 
 # Start both services
 CMD ["/app/start_services.sh"]
