@@ -16,6 +16,10 @@ import seaborn as sns
 import warnings
 import sys
 import logging
+import numpy as np
+from matplotlib.ticker import FuncFormatter
+import time
+
 # Suppress warnings
 warnings.filterwarnings('ignore')
 
@@ -305,19 +309,19 @@ def generate_analysis(df, segment):
         # Generate dummy data for demonstration if connection fails
         try:
             # Extract top products
-            top_products = df.groupby("PRODUCT_NAME").agg({
-                "REVENUE": "sum", 
-                "UNITS_SOLD": "sum", 
-                "ESTIMATED_PROFIT": "sum"
-            }).sort_values("REVENUE", ascending=False).head(5)
+            top_products = df.groupby("product_name").agg({
+                "revenue": "sum", 
+                "units_sold": "sum", 
+                "estimated_profit": "sum"
+            }).sort_values("revenue", ascending=False).head(5)
             
             analysis_result["data_tables"]["top_products"] = top_products.reset_index()
             
             # Extract channel data
-            channels = df.groupby("SALES_CHANNEL").agg({
-                "REVENUE": "sum", 
-                "UNITS_SOLD": "sum"
-            }).sort_values("REVENUE", ascending=False)
+            channels = df.groupby("sales_channel").agg({
+                "revenue": "sum", 
+                "units_sold": "sum"
+            }).sort_values("revenue", ascending=False)
             
             analysis_result["data_tables"]["channels"] = channels.reset_index()
             
@@ -357,6 +361,165 @@ def generate_analysis(df, segment):
         st.error(f"Error generating analysis: {str(e)}")
         return None
 
+# Function to create multiple visualizations
+def create_sales_visualizations(df):
+    visualizations = {}
+    
+    # Set the style for all visualizations
+    sns.set(style="darkgrid")
+    plt.rcParams.update({'font.size': 12})
+    
+    # Create a function to format currency on axes
+    def currency_formatter(x, pos):
+        return f"${x:,.2f}"
+
+    # Create a function to format percentage on axes
+    def percentage_formatter(x, pos):
+        return f"{x:.0f}%"
+
+    # 1. Product Performance Analysis
+    fig1, axes = plt.subplots(2, 2, figsize=(18, 14))
+    
+    # 1.1 Total Revenue by Product - Fix column names to lowercase
+    product_revenue = df.groupby('product_name')['revenue'].sum().sort_values(ascending=False)
+    sns.barplot(x=product_revenue.values, y=product_revenue.index, ax=axes[0, 0], palette='viridis')
+    axes[0, 0].set_title('Total Revenue by Product', fontsize=14)
+    axes[0, 0].set_xlabel('Revenue ($)')
+    axes[0, 0].xaxis.set_major_formatter(FuncFormatter(currency_formatter))
+    for i, v in enumerate(product_revenue.values):
+        axes[0, 0].text(v + 5, i, f"${v:,.2f}", va='center')
+    
+    # 1.2 Units Sold by Product - Fix column names to lowercase
+    product_units = df.groupby('product_name')['units_sold'].sum().sort_values(ascending=False)
+    sns.barplot(x=product_units.values, y=product_units.index, ax=axes[0, 1], palette='viridis')
+    axes[0, 1].set_title('Total Units Sold by Product', fontsize=14)
+    axes[0, 1].set_xlabel('Units Sold')
+    for i, v in enumerate(product_units.values):
+        axes[0, 1].text(v + 0.5, i, f"{v:,}", va='center')
+    
+    # 1.3 Average Price by Product - Fix column names to lowercase
+    product_price = df.groupby('product_name')['price'].mean().sort_values(ascending=False)
+    sns.barplot(x=product_price.values, y=product_price.index, ax=axes[1, 0], palette='viridis')
+    axes[1, 0].set_title('Average Price by Product', fontsize=14)
+    axes[1, 0].set_xlabel('Average Price ($)')
+    axes[1, 0].xaxis.set_major_formatter(FuncFormatter(currency_formatter))
+    for i, v in enumerate(product_price.values):
+        axes[1, 0].text(v + 0.5, i, f"${v:.2f}", va='center')
+    
+    # 1.4 Total Profit by Product - Fix column names to lowercase
+    product_profit = df.groupby('product_name')['estimated_profit'].sum().sort_values(ascending=False)
+    sns.barplot(x=product_profit.values, y=product_profit.index, ax=axes[1, 1], palette='viridis')
+    axes[1, 1].set_title('Total Profit by Product', fontsize=14)
+    axes[1, 1].set_xlabel('Profit ($)')
+    axes[1, 1].xaxis.set_major_formatter(FuncFormatter(currency_formatter))
+    for i, v in enumerate(product_profit.values):
+        axes[1, 1].text(v + 5, i, f"${v:,.2f}", va='center')
+    
+    plt.tight_layout()
+    visualizations['product_performance'] = fig1
+    
+    # 2. Geographic Analysis
+    fig2, axes = plt.subplots(2, 1, figsize=(14, 12))
+    
+    # 2.1 Revenue by City - Fix column names to lowercase
+    city_revenue = df.groupby('city_name')['revenue'].sum().sort_values(ascending=False)
+    sns.barplot(x=city_revenue.index, y=city_revenue.values, ax=axes[0], palette='mako')
+    axes[0].set_title('Total Revenue by City', fontsize=14)
+    axes[0].set_ylabel('Revenue ($)')
+    axes[0].set_xlabel('')
+    axes[0].yaxis.set_major_formatter(FuncFormatter(currency_formatter))
+    axes[0].tick_params(axis='x', rotation=45)
+    for i, v in enumerate(city_revenue.values):
+        axes[0].text(i, v + 10, f"${v:,.2f}", ha='center')
+    
+    # 2.2 Revenue by State - Fix column names to lowercase
+    state_revenue = df.groupby('state')['revenue'].sum().sort_values(ascending=False)
+    sns.barplot(x=state_revenue.index, y=state_revenue.values, ax=axes[1], palette='mako')
+    axes[1].set_title('Total Revenue by State', fontsize=14)
+    axes[1].set_ylabel('Revenue ($)')
+    axes[1].set_xlabel('')
+    axes[1].yaxis.set_major_formatter(FuncFormatter(currency_formatter))
+    for i, v in enumerate(state_revenue.values):
+        axes[1].text(i, v + 10, f"${v:,.2f}", ha='center')
+    
+    plt.tight_layout()
+    visualizations['geographic_analysis'] = fig2
+    
+    # 3. Profit Margin Analysis
+    fig3, axes = plt.subplots(1, 2, figsize=(18, 7))
+    
+    # 3.1 Average Margin % by Product - Fix column names to lowercase
+    product_margin = df.groupby('product_name')['estimated_margin_pct'].mean().sort_values(ascending=False)
+    sns.barplot(x=product_margin.index, y=product_margin.values, ax=axes[0], palette='rocket')
+    axes[0].set_title('Average Profit Margin by Product', fontsize=14)
+    axes[0].set_ylabel('Margin %')
+    axes[0].set_xlabel('')
+    axes[0].tick_params(axis='x', rotation=45)
+    for i, v in enumerate(product_margin.values):
+        axes[0].text(i, v + 1, f"{v:.1f}%", ha='center')
+    
+    # 3.2 Margin vs Revenue Scatterplot - Fix column names to lowercase
+    sns.scatterplot(x='revenue', y='estimated_margin_pct', data=df, 
+                    hue='product_name', size='units_sold', sizes=(50, 200),
+                    ax=axes[1])
+    axes[1].set_title('Margin vs Revenue by Transaction', fontsize=14)
+    axes[1].set_xlabel('Revenue ($)')
+    axes[1].set_ylabel('Margin %')
+    axes[1].xaxis.set_major_formatter(FuncFormatter(currency_formatter))
+    
+    plt.tight_layout()
+    visualizations['margin_analysis'] = fig3
+    
+    # 4. Time Series Analysis
+    # Convert date to datetime if it's not already
+    if df['date'].dtype != 'datetime64[ns]':
+        df['date'] = pd.to_datetime(df['date'])
+    
+    fig4, axes = plt.subplots(2, 1, figsize=(14, 12))
+    
+    # 4.1 Revenue Over Time by Product - Fix column names to lowercase
+    time_product = df.groupby(['date', 'product_name'])['revenue'].sum().reset_index()
+    sns.lineplot(x='date', y='revenue', hue='product_name', data=time_product, 
+                marker='o', ax=axes[0])
+    axes[0].set_title('Revenue Over Time by Product', fontsize=14)
+    axes[0].set_ylabel('Revenue ($)')
+    axes[0].set_xlabel('')
+    axes[0].yaxis.set_major_formatter(FuncFormatter(currency_formatter))
+    axes[0].legend(title='Product')
+    
+    # 4.2 Units Sold Over Time - Fix column names to lowercase
+    time_units = df.groupby('date')['units_sold'].sum().reset_index()
+    sns.lineplot(x='date', y='units_sold', data=time_units, color='purple', 
+                marker='o', linewidth=2, ax=axes[1])
+    axes[1].set_title('Total Units Sold Over Time', fontsize=14)
+    axes[1].set_ylabel('Units Sold')
+    axes[1].set_xlabel('Date')
+    
+    plt.tight_layout()
+    visualizations['time_series'] = fig4
+    
+    # 5. Price Distribution and Product Mix
+    fig5, axes = plt.subplots(1, 2, figsize=(18, 7))
+    
+    # 5.1 Price Distribution - Fix column names to lowercase
+    sns.histplot(df['price'], bins=10, kde=True, ax=axes[0], color='teal')
+    axes[0].set_title('Price Distribution', fontsize=14)
+    axes[0].set_xlabel('Price ($)')
+    axes[0].set_ylabel('Frequency')
+    axes[0].xaxis.set_major_formatter(FuncFormatter(currency_formatter))
+    
+    # 5.2 Product Mix (Revenue Share) - Fix column names to lowercase
+    product_share = df.groupby('product_name')['revenue'].sum()
+    explode = [0.1] * len(product_share)  # Explode all slices slightly
+    axes[1].pie(product_share, labels=product_share.index, autopct='%1.1f%%',
+                startangle=90, shadow=True, explode=explode)
+    axes[1].set_title('Revenue Share by Product', fontsize=14)
+    axes[1].axis('equal')  # Equal aspect ratio ensures that pie is drawn as a circle
+    
+    plt.tight_layout()
+    visualizations['price_product_mix'] = fig5
+    
+    return visualizations
 
 # Always show upload container
 upload_container = st.container()
@@ -425,8 +588,18 @@ if 'sales_data' in st.session_state and st.session_state['sales_data'] is not No
                         st.warning(f"Note: Could not connect to Snowflake: {str(e)}")
                         st.info("Proceeding with local data analysis only.")
                     
-                    # Show success message and refresh to update UI
-                    st.info("You can now click 'Generate Analysis' below.")
+                    # Show countdown and generate visualizations automatically
+                    countdown_placeholder = st.empty()
+                    for i in range(5, 0, -1):
+                        countdown_placeholder.info(f"Generating visualizations in {i} seconds...")
+                        time.sleep(1)
+                    countdown_placeholder.empty()
+                    
+                    # Flag to track visualization status
+                    st.session_state['auto_generate_viz'] = True
+                    
+                    # Refresh to update UI
+                    st.experimental_rerun()
                 else:
                     # Local save failed
                     st.error(f"Failed to save data: {local_result['message']}")
@@ -438,6 +611,19 @@ else:
     else:
         st.warning("Please load data before proceeding")
 
+# Automatic visualization generation after data save
+if 'auto_generate_viz' in st.session_state and st.session_state['auto_generate_viz'] and 'sales_data' in st.session_state and st.session_state['sales_data'] is not None:
+    with st.spinner("Generating visualizations..."):
+        # Create all visualizations
+        visualizations = create_sales_visualizations(st.session_state['sales_data'])
+        st.session_state['visualizations'] = visualizations
+        st.session_state['auto_generate_viz'] = False  # Reset flag to prevent regeneration
+    
+    # Display success message
+    st.success("✅ Visualizations generated successfully!")
+    
+    # Add spacer
+    st.markdown("---")
 
 # Display "Generate Analysis" button in the main area once data is uploaded
 if 'snowflake_uploaded' in st.session_state and st.session_state['snowflake_uploaded']:
@@ -601,3 +787,51 @@ if 'analysis_result' in st.session_state and st.session_state['analysis_result']
         
         plt.tight_layout()
         st.pyplot(fig)
+
+# Display visualizations if available
+if 'sales_data' in st.session_state and st.session_state['sales_data'] is not None:
+    # Use cached visualizations if available, otherwise generate them
+    if 'visualizations' in st.session_state:
+        visualizations = st.session_state['visualizations']
+    else:
+        visualizations = create_sales_visualizations(st.session_state['sales_data'])
+        st.session_state['visualizations'] = visualizations
+
+    # Display visualizations in Streamlit
+    st.header("📊 Pharmaceutical Sales Analytics")
+
+    # Product Performance
+    st.subheader("Product Performance Analysis")
+    st.pyplot(visualizations['product_performance'])
+
+    # Geographic Analysis
+    st.subheader("Geographic Sales Analysis")
+    st.pyplot(visualizations['geographic_analysis'])
+
+    # Margin Analysis
+    st.subheader("Profit Margin Analysis")
+    st.pyplot(visualizations['margin_analysis'])
+
+    # Time Series Analysis
+    st.subheader("Sales Trends Over Time")
+    st.pyplot(visualizations['time_series'])
+
+    # Price Distribution and Product Mix
+    st.subheader("Price Distribution & Product Mix")
+    st.pyplot(visualizations['price_product_mix'])
+
+    # Additional insights - summary metrics in columns
+    st.subheader("Summary Metrics")
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        st.metric("Total Revenue", f"${st.session_state['sales_data']['revenue'].sum():,.2f}")
+
+    with col2:
+        st.metric("Total Units Sold", f"{st.session_state['sales_data']['units_sold'].sum():,}")
+
+    with col3:
+        st.metric("Avg. Profit Margin", f"{st.session_state['sales_data']['estimated_margin_pct'].mean():.1f}%")
+
+    with col4:
+        st.metric("Total Profit", f"${st.session_state['sales_data']['estimated_profit'].sum():,.2f}")
