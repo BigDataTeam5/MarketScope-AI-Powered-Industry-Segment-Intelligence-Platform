@@ -30,6 +30,8 @@
 ## 🔧 Architecture Overview
 
 ![alt text](image.png)
+![image](https://github.com/user-attachments/assets/60a8fa36-eb5f-4ae2-a0bd-d2f45c4e2c68)
+
 
 - **Frontend**: Streamlit (exploratory dashboard)
 - **Backend**: FastAPI
