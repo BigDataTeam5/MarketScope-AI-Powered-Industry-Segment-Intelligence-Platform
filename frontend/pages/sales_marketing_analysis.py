@@ -83,7 +83,7 @@ with st.sidebar:
 
 st.title("📊 Sales Data & Marketing Strategy Analysis")
 st.markdown("""
-Upload your healthcare product sales data to:
+Upload your latest Quaterly Data of healthcare product sales data to:
 1. Get detailed sales analytics and visualizations
 2. Analyze market trends for your products
 3. Receive AI-generated marketing strategies based on Philip Kotler's marketing principles

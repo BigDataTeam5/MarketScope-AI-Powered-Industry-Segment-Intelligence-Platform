@@ -165,7 +165,7 @@ data/
 
 # Cython debug symbols
 cython_debug/
-!Airflow/config/book.json
+!Airflow/config/*
 Airflow/logs/*
 # PyCharm
 #  JetBrains specific template is maintained in a separate JetBrains.gitignore that can

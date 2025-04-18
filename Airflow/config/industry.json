@@ -1,0 +1,6 @@
+{
+    "AWS_CONN_ID": "aws_default",
+    "S3_BUCKET": "finalproject-product",
+    "S3_BASE_FOLDER": "industry_reports",
+    "PINECONE_INDEX_NAME": "industry-reports"
+}

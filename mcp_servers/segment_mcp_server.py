@@ -179,7 +179,28 @@ class SegmentMCPServer:
         self._register_market_size_tool()
         self._register_search_tool()
         # Debug: Print registered tools
-        logger.info(f"Available tools: {self.mcp_server.list_tools()}")
+        
+        # Replace the problematic line with one of these options:
+        
+        # Option 1: Using asyncio.run (recommended for this case)
+        import asyncio
+        try:
+            tools = asyncio.run(self.mcp_server.list_tools())
+            logger.info(f"Available tools: {tools}")
+        except RuntimeError:
+            # asyncio.run can't be called from a running event loop
+            logger.info("Available tools: (Unable to retrieve tools list synchronously)")
+        
+        # Option 2: Alternative - create a new event loop if needed
+        # import asyncio
+        # try:
+        #     loop = asyncio.new_event_loop()
+        #     tools = loop.run_until_complete(self.mcp_server.list_tools())
+        #     loop.close()
+        #     logger.info(f"Available tools: {tools}")
+        # except Exception as e:
+        #     logger.error(f"Error getting tools list: {e}")
+        #     logger.info("Available tools: (Unable to retrieve tools list)")
 
     def _register_market_size_tool(self):
         """Register the analyze_market_size tool with MCP server"""
