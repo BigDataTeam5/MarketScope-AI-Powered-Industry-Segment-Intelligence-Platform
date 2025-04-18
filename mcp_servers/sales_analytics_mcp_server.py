@@ -46,15 +46,15 @@ state = {
 
 # Register MCP tools
 @mcp_server.tool()
-def analyze_sales_data(csv_data: Optional[str] = None) -> Dict[str, Any]:
+def analyze_sales_data(data: Optional[Any] = None) -> Dict[str, Any]:
     """Analyze sales data to extract key insights"""
     try:
         logger.info("Analyzing sales data")
         
-        # Use provided CSV data or previously uploaded data
+        # Use provided data or previously uploaded data
         df = None
-        if csv_data:
-            df = pd.read_csv(io.StringIO(csv_data))
+        if isinstance(data, pd.DataFrame):
+            df = data
             state["uploaded_data"] = df
         elif state["uploaded_data"] is not None:
             df = state["uploaded_data"]

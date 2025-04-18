@@ -4,9 +4,10 @@ Configuration module for MarketScope
 import os
 import importlib
 from typing import Dict, Any, List, Type
-
+from dotenv import load_dotenv
+load_dotenv(override=True)
 class Config:
-    """Unified configuration for the MarketScope application"""
+    """Configuration settings for MarketScope"""
     
     # AWS Credentials
     AWS_SERVER_PUBLIC_KEY = os.getenv("AWS_SERVER_PUBLIC_KEY")
@@ -19,11 +20,12 @@ class Config:
     S3_CHUNKS_FILE = os.getenv("S3_CHUNKS_FILE", "S3D7W4_Marketing_Management_chunks.json")
     
     # Pinecone Configuration
-    PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
-    PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME", "marketscope-index")
+    PINECONE_API_KEY = os.getenv("PINECONE_API_KEY", "")
+    PINECONE_ENV = os.getenv("PINECONE_ENV", "us-east-1")
+    PINECONE_INDEX = "marketscope"
     
     # API Keys
-    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
     ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
     GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
     GROK_API_KEY = os.getenv("GROK_API_KEY")
@@ -33,14 +35,14 @@ class Config:
     SNOWFLAKE_USER = os.getenv("SNOWFLAKE_USER", "")
     SNOWFLAKE_PASSWORD = os.getenv("SNOWFLAKE_PASSWORD", "")
     SNOWFLAKE_ACCOUNT = os.getenv("SNOWFLAKE_ACCOUNT", "")
-    SNOWFLAKE_WAREHOUSE = os.getenv("SNOWFLAKE_WAREHOUSE", "COMPUTE_WH")
-    SNOWFLAKE_DATABASE = os.getenv("SNOWFLAKE_DATABASE", "HEALTHCARE_INDUSTRY_CUSTOMER_DATA")
-    SNOWFLAKE_ROLE = os.getenv("SNOWFLAKE_ROLE", "ACCOUNTADMIN")
+    SNOWFLAKE_DATABASE = "HEALTHCARE_INDUSTRY_CUSTOMER_DATA"
+    SNOWFLAKE_WAREHOUSE = "COMPUTE_WH"
     SNOWFLAKE_MCP_PORT = 8004
     
     # Model Configuration
-    DEFAULT_MODEL = "gpt-4o"
-    DEFAULT_TEMPERATURE = 0.3
+    DEFAULT_MODEL = "gpt-4"
+    TEMPERATURE = 0.7
+    MAX_TOKENS = 1000
     
     AVAILABLE_MODELS = {
         "gpt-4o": {"name": "GPT-4 Optimized", "provider": "openai"},
@@ -50,10 +52,39 @@ class Config:
         "grok-1": {"name": "Grok-1", "provider": "grok"}
     }
     
-    # Server Configuration
-    MCP_PORT = int(os.getenv("MCP_PORT", "8000"))
-    API_PORT = int(os.getenv("API_PORT", "8001"))
-    MCP_URL = f"http://localhost:{MCP_PORT}/sse"
+    # MCP Server ports
+    MCP_PORT = 8000  # Main unified MCP server
+    SALES_MCP_PORT = 8002  # Sales analytics MCP server
+    MARKET_MCP_PORT = 8003  # Market analysis MCP server
+    
+    # Server base URLs - use environment variables if available
+    MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:8000")
+    SALES_MCP_URL = os.getenv("SALES_MCP_URL", "http://localhost:8002")
+    MARKET_MCP_URL = os.getenv("MARKET_MCP_URL", "http://localhost:8003")
+    SNOWFLAKE_MCP_URL = os.getenv("SNOWFLAKE_MCP_URL", "http://localhost:8004")
+    
+    # Service URLs mapping
+    SERVICE_URLS = {
+        "marketscope": MCP_SERVER_URL,
+        "sales": SALES_MCP_URL,
+        "market": MARKET_MCP_URL,
+        "snowflake": SNOWFLAKE_MCP_URL
+    }
+    
+    # API endpoints
+    API_BASE = "/api/v1"
+    MCP_BASE = "/mcp"
+    TOOLS_ENDPOINT = "/tools"
+    HEALTH_ENDPOINT = "/health"
+    
+    # Endpoint paths
+    def get_tools_path(self):
+        """Get the tools endpoint path with fallback"""
+        return f"{self.MCP_BASE}{self.TOOLS_ENDPOINT}", self.TOOLS_ENDPOINT
+    
+    def get_health_path(self):
+        """Get the health check endpoint path"""
+        return f"{self.HEALTH_ENDPOINT}"
     
     # Tool Configuration
     ENABLED_TOOLS = [

@@ -61,7 +61,76 @@ def run_unified_server():
     # Register basic tools directly in the unified server
     
     # Market Analysis tools
+        # Marketing book query tools
     @mcp_server.tool()
+    def query_marketing_book(query: str, top_k: int = 3) -> dict:
+        """Query Philip Kotler's Marketing Management book for relevant content"""
+        try:
+            # This is a simple mock implementation - in production you'd connect to a database or vector store
+            return {
+                "status": "success",
+                "results": [
+                    {
+                        "chunk_id": "marketing-123",
+                        "text": f"This is a sample result for the query: {query}"
+                    },
+                    {
+                        "chunk_id": "marketing-456",
+                        "text": "Philip Kotler emphasizes the importance of market segmentation as a core strategy."
+                    },
+                    {
+                        "chunk_id": "marketing-789",
+                        "text": "Effective positioning requires a clear understanding of your target audience's needs."
+                    }
+                ]
+            }
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+    
+    @mcp_server.tool()
+    def generate_segment_strategy(segment_name: str, product_type: str, competitive_position: str = "challenger") -> dict:
+        """Generate a marketing strategy for a specific segment and product type"""
+        valid_positions = ["leader", "challenger", "follower", "nicher"]
+        position = competitive_position if competitive_position in valid_positions else "challenger"
+        
+        try:
+            return {
+                "status": "success",
+                "strategy": f"Custom marketing strategy for {product_type} in the {segment_name} segment as a {position}.",
+                "recommendations": [
+                    f"Focus on {position}-specific tactics for market growth",
+                    "Leverage digital marketing channels for customer acquisition",
+                    f"Develop pricing strategy appropriate for {segment_name} segment"
+                ]
+            }
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+    
+    # Add a simple health-check tool to the unified server
+    @mcp_server.tool()
+    def unified_health_check() -> dict:
+        """Check the health of all MCP servers"""
+        import requests
+        servers = [
+            {"name": "Market Analysis", "url": "http://localhost:8001/health"},
+            {"name": "Sales Analytics", "url": "http://localhost:8002/health"},
+            {"name": "Segment", "url": "http://localhost:8003/health"},
+            {"name": "Snowflake", "url": "http://localhost:8004/health"}
+        ]
+        
+        results = {}
+        for server in servers:
+            try:
+                response = requests.get(server["url"], timeout=2)
+                results[server["name"]] = "healthy" if response.status_code == 200 else "unhealthy"
+            except:
+                results[server["name"]] = "unavailable"
+        
+        return {
+            "status": "healthy",
+            "message": "MarketScope Unified MCP Server is running",
+            "servers": results
+        }
     def market_analysis_health_check() -> dict:
         """Check if the Market Analysis server is available"""
         import requests
@@ -144,31 +213,50 @@ def run_unified_server():
         except Exception as e:
             return {"status": "error", "message": str(e)}
     
-    # Add a simple health-check tool to the unified server
+    # Marketing book query tools
     @mcp_server.tool()
-    def unified_health_check() -> dict:
-        """Check the health of all MCP servers"""
-        import requests
-        servers = [
-            {"name": "Market Analysis", "url": "http://localhost:8001/health"},
-            {"name": "Sales Analytics", "url": "http://localhost:8002/health"},
-            {"name": "Segment", "url": "http://localhost:8003/health"},
-            {"name": "Snowflake", "url": "http://localhost:8004/health"}
-        ]
+    def query_marketing_book(query: str, top_k: int = 3) -> dict:
+        """Query Philip Kotler's Marketing Management book for relevant content"""
+        try:
+            # This is a simple mock implementation - in production you'd connect to a database or vector store
+            return {
+                "status": "success",
+                "results": [
+                    {
+                        "chunk_id": "marketing-123",
+                        "text": f"This is a sample result for the query: {query}"
+                    },
+                    {
+                        "chunk_id": "marketing-456",
+                        "text": "Philip Kotler emphasizes the importance of market segmentation as a core strategy."
+                    },
+                    {
+                        "chunk_id": "marketing-789",
+                        "text": "Effective positioning requires a clear understanding of your target audience's needs."
+                    }
+                ]
+            }
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+    
+    @mcp_server.tool()
+    def generate_segment_strategy(segment_name: str, product_type: str, competitive_position: str = "challenger") -> dict:
+        """Generate a marketing strategy for a specific segment and product type"""
+        valid_positions = ["leader", "challenger", "follower", "nicher"]
+        position = competitive_position if competitive_position in valid_positions else "challenger"
         
-        results = {}
-        for server in servers:
-            try:
-                response = requests.get(server["url"], timeout=2)
-                results[server["name"]] = "healthy" if response.status_code == 200 else "unhealthy"
-            except:
-                results[server["name"]] = "unavailable"
-        
-        return {
-            "status": "healthy",
-            "message": "MarketScope Unified MCP Server is running",
-            "servers": results
-        }
+        try:
+            return {
+                "status": "success",
+                "strategy": f"Custom marketing strategy for {product_type} in the {segment_name} segment as a {position}.",
+                "recommendations": [
+                    f"Focus on {position}-specific tactics for market growth",
+                    "Leverage digital marketing channels for customer acquisition",
+                    f"Develop pricing strategy appropriate for {segment_name} segment"
+                ]
+            }
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
     
     # Mount the MCP server to the FastAPI app at the /mcp path
     app.mount("/mcp", mcp_server.sse_app())
@@ -200,6 +288,13 @@ def run_unified_server():
                 {"name": "Segment", "url": "http://localhost:8003"},
                 {"name": "Snowflake", "url": "http://localhost:8004"}
             ]
+        }
+        
+    @app.get("/segments")
+    async def get_segments():
+        """Get available segments"""
+        return {
+            "segments": list(Config.SEGMENT_CONFIG.keys())
         }
     
     logger.info(f"Starting unified MCP Server on port {Config.MCP_PORT}")
