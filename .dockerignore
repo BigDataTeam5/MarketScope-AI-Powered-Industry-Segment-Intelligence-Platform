@@ -14,7 +14,7 @@ htmlcov/
 .cache/
 
 # Frontend-related (excluded for backend build)
-frontend/
+
 streamlit_app/
 *streamlit*.py
 **/node_modules/
