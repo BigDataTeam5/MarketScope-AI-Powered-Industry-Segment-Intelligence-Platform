@@ -37,6 +37,7 @@ class Config:
     SNOWFLAKE_ACCOUNT = os.getenv("SNOWFLAKE_ACCOUNT", "")
     SNOWFLAKE_DATABASE = "HEALTHCARE_INDUSTRY_CUSTOMER_DATA"
     SNOWFLAKE_WAREHOUSE = "COMPUTE_WH"
+    SNOWFLAKE_ROLE = os.getenv("SNOWFLAKE_ROLE", "ACCOUNTADMIN")  # Added missing role config
     SNOWFLAKE_MCP_PORT = 8004
     
     # Model Configuration

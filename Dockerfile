@@ -4,28 +4,28 @@ FROM python:3.10-slim
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PATH="/root/.local/bin:$PATH"
+ENV PIP_NO_CACHE_DIR=1
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     dos2unix \
     curl \
     build-essential \
+    git \
+    gcc \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
-
-# Install Poetry
-RUN curl -sSL https://install.python-poetry.org | python3 -
-
-# Avoid creating virtualenvs inside container
-RUN poetry config virtualenvs.create false
 
 # Set working directory
 WORKDIR /app
 ENV PYTHONPATH=/app
 
-# Install dependencies separately for cache efficiency
-COPY pyproject.toml poetry.lock* ./
-RUN poetry install --no-root --no-interaction --no-ansi
+# Copy requirements.txt for pip installation (much faster than Poetry for Docker builds)
+COPY requirements.txt ./
+
+# Install dependencies using pip (faster and more reliable in Docker)
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy all project code
 COPY . .

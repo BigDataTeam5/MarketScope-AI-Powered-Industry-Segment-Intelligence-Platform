@@ -18,7 +18,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 from config.config import Config
 from frontend.utils import sidebar
 from agents.unified_agent import unified_agent
-from mcp_servers.snowflake_mcp_server import SnowflakeMCPServer
+# from mcp_servers.snowflake_mcp_server import SnowflakeMCPServer
 
 # Set page config to full width
 st.set_page_config(
