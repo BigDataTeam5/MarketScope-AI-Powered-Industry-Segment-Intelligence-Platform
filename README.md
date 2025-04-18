@@ -102,8 +102,9 @@ If you encounter issues:
 - Ensure your environment variables are properly set up
 - Check the application logs for specific error messages
 
-##CodeLbs
+## CodeLabs
 https://codelabs-preview.appspot.com/?file_id=1_936snjPYvoj-RmfO5Vcm2G8xzjVTv0XGRy5wHlFiCo/edit?pli=1&tab=t.0#0
+
 ## License
 
 [MIT License](LICENSE)
