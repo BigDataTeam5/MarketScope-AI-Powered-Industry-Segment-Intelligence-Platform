@@ -1,4 +1,4 @@
-# MarketScope AI: AI-Powered Industry Segment Intelligence Platform
+# MarketScope AI: Healthcare Product Analytics 
 
 MarketScope AI is an intelligent analytics platform that helps you understand and analyze different healthcare market segments using advanced AI and natural language processing.
 
@@ -17,6 +17,7 @@ MarketScope AI is an intelligent analytics platform that helps you understand an
 - Required packages (installed automatically when following the setup instructions)
 
 ### Setup and Running
+![diagram-export-4-18-2025-2_51_50-PM](https://github.com/user-attachments/assets/6f26c242-6cfc-4f3a-9d49-d6fafab3aa03)
 
 #### Simple Method
 Run the simplified starter script:
@@ -100,6 +101,9 @@ If you encounter issues:
 - Verify that no other applications are using the required ports (8000-8004, 8501)
 - Ensure your environment variables are properly set up
 - Check the application logs for specific error messages
+
+## CodeLabs
+https://codelabs-preview.appspot.com/?file_id=1_936snjPYvoj-RmfO5Vcm2G8xzjVTv0XGRy5wHlFiCo/edit?pli=1&tab=t.0#0
 
 ## License
 
