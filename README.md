@@ -29,8 +29,6 @@
 
 ## 🔧 Architecture Overview
 
-![alt text](image.png)
-
 ![diagram-export-4-18-2025-2_51_50-PM](https://github.com/user-attachments/assets/b71bc874-d979-4f89-8c0a-8597c17368d5)
 
 
