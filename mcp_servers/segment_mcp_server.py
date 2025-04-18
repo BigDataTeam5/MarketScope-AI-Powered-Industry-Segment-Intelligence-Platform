@@ -812,11 +812,14 @@ class SegmentMCPServer:
                 import openai
                 openai.api_key = os.getenv("OPENAI_API_KEY")
                 
+                # Define the separator outside the f-string
+                separator = "\n\n"
+
                 prompt = f"""
 You are an expert in market analysis. Based on the following excerpts from Form 10Q reports, provide a concise and refined answer to the query: "{query}".
 
 Excerpts:
-{"\n\n".join([f"Chunk {i+1}: {chunk}" for i, chunk in enumerate(chunks)])}
+{separator.join([f"Chunk {i+1}: {chunk}" for i, chunk in enumerate(chunks)])}
 
 Answer:
 """
