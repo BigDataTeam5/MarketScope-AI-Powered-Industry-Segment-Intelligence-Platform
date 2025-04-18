@@ -12,6 +12,73 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 from config import Config
 from frontend.utils import process_query, sidebar, create_visualization_from_mcp, render_chart, get_mcp_server_url
 
+# Replace:
+# from mcp.client import MCPClient
+
+# With:
+from agents.custom_mcp_client import MCPClient
+
+# Create a simple MCPClient alternative that uses requests
+class SimpleMCPClient:
+    def __init__(self, base_url):
+        self.base_url = base_url
+        print(f"Initialized SimpleMCPClient with base_url: {base_url}")
+        
+    def invoke(self, tool_name, params=None):
+        """Invoke an MCP tool"""
+        try:
+            # The correct endpoint structure for FastMCP
+            url = f"{self.base_url}/invoke/{tool_name}"
+            print(f"Invoking tool: {tool_name} at URL: {url}")
+            
+            response = requests.post(
+                url,
+                json=params or {},
+                headers={"Content-Type": "application/json"},
+                timeout=60
+            )
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                error_msg = f"Request failed with status {response.status_code}: {response.text}"
+                print(f"Error: {error_msg}")
+                return {
+                    "status": "error",
+                    "message": error_msg
+                }
+        except Exception as e:
+            print(f"Exception calling MCP: {str(e)}")
+            return {
+                "status": "error",
+                "message": f"Error invoking MCP tool: {str(e)}"
+            }
+    
+    # Add the missing invoke_sync method as an alias to invoke
+    invoke_sync = invoke
+
+# Use SimpleMCPClient instead of MCPClient
+MCPClient = SimpleMCPClient
+
+# Check your get_mcp_server_url function to ensure it's looking up the right port
+def get_mcp_server_url(segment_name):
+    """Get the URL for a specific segment MCP server"""
+    from config.config import Config
+    
+    # Default port if segment not found
+    default_port = 8014
+    
+    # Get port from Config
+    port = default_port
+    if hasattr(Config, 'SEGMENT_CONFIG') and segment_name in Config.SEGMENT_CONFIG:
+        port = Config.SEGMENT_CONFIG[segment_name].get('port', default_port)
+    else:
+        print(f"Warning: Segment {segment_name} not found in Config.SEGMENT_CONFIG")
+        print(f"Available segments: {Config.SEGMENT_CONFIG.keys() if hasattr(Config, 'SEGMENT_CONFIG') else 'None'}")
+    
+    # Map segment names to server URLs
+    return f"http://localhost:{port}"
+
 st.set_page_config(layout="wide")
 
 
@@ -40,11 +107,11 @@ def show():
     - Industry-specific factors
     """)
     
-    # Create tabs for different functionalities
-    tab1, tab2, tab3 = st.tabs(["Segment Analysis", "Product Trends Visualization", "Data Upload"])
+    # Create tabs for different functionalities - Added new "Market Size Analysis" tab
+    tab1, tab2, tab3, tab4 = st.tabs(["Segment Analysis", "Market Size Analysis", "Product Trends Visualization", "Data Upload"])
     
     with tab1:
-        # Example segmentation form
+        # Original segment analysis form - No changes here
         with st.form("market_segment_form"):
             st.subheader("Define Market Segment")
             
@@ -119,77 +186,175 @@ def show():
                     st.chat_message("assistant").error(f"Failed to generate response: {response}")
 
     with tab2:
-        st.subheader("Product Trends Visualization")
+        st.subheader("Market Size Analysis (TAM, SAM, SOM)")
         st.markdown("""
-        Visualize product trends and analyze market data from various segments.
-        Select a segment and visualization type to generate insights from market data.
+        Analyze the Total Addressable Market (TAM), Serviceable Available Market (SAM), 
+        and Serviceable Obtainable Market (SOM) for selected industry segments based on Form 10Q reports.
         """)
         
-        # Get the selected segment from session state
-        selected_segment = st.session_state.get("selected_segment", "Diagnostic Segment")
+        # Get the selected segment from session state or let user select one
+        selected_segment = st.session_state.get("selected_segment")
         
-        # Allow user to select visualization type
-        viz_type = st.selectbox(
-            "Select visualization type",
-            options=["price_comparison", "rating_analysis", "price_distribution"],
-            format_func=lambda x: {
-                "price_comparison": "Price Comparison",
-                "rating_analysis": "Rating Analysis",
-                "price_distribution": "Price Distribution"
-            }.get(x, x)
+        # Allow user to select a different segment for analysis
+        segments = ["Skin Care Segment", "Healthcare - Diagnostic", "Pharmaceutical"]
+        try:
+            # Try to get segments from the API
+            segment_url = get_mcp_server_url("segment")
+            response = requests.get(f"{segment_url}/segments", timeout=2)
+            if response.status_code == 200:
+                segments = response.json().get("segments", segments)
+        except Exception as e:
+            st.warning(f"Could not retrieve segments from API: {str(e)}")
+        
+        selected_segment = st.selectbox(
+            "Select industry segment for analysis:",
+            options=segments,
+            index=segments.index(selected_segment) if selected_segment in segments else 0
         )
         
-        # Optional table name input
-        table_name = st.text_input("Snowflake table name (optional):", "")
-        
-        # Button to generate visualization
-        if st.button("Generate Visualization"):
-            with st.spinner(f"Generating {viz_type} visualization..."):
-                # Call segment MCP server for visualization - direct connection
-                result = create_visualization_from_mcp(selected_segment, viz_type, table_name)
+        # Button to perform analysis
+        col1, col2 = st.columns([1, 3])
+        with col1:
+            perform_analysis = st.button("Analyze Market Size")
+        with col2:
+            refresh_analysis = st.button("Clear & Refresh")
+            
+        if refresh_analysis:
+            # Clear any cached results
+            if "market_size_result" in st.session_state:
+                del st.session_state.market_size_result
                 
-                if result.get("status") == "success" and "chart_data" in result:
-                    # Render chart
-                    render_chart(result["chart_data"])
-                    
-                    # Show additional information
-                    with st.expander("View Data Details"):
-                        st.json(result.get("data", {}))
+        if perform_analysis or "market_size_result" in st.session_state:
+            with st.spinner(f"Analyzing market size for {selected_segment}..."):
+                try:
+                    # Use cached result if available, otherwise fetch from server
+                    if "market_size_result" in st.session_state and not refresh_analysis:
+                        result = st.session_state.market_size_result
+                        st.info("Using cached analysis results. Click 'Clear & Refresh' for fresh data.")
+                    else:
+                        # Direct API call to get market size data
+                        segment_url = get_mcp_server_url(selected_segment)
                         
-                        # Show statistics if available
-                        if "statistics" in result:
-                            st.subheader("Statistics")
-                            st.write(result["statistics"])
+                        response = requests.post(
+                            f"{segment_url}/direct/analyze_market_size",
+                            params={"segment": selected_segment},
+                            timeout=60
+                        )
                         
-                        # Show sample size
-                        if "sample_size" in result:
-                            st.write(f"**Sample size:** {result['sample_size']} items")
+                        if response.status_code == 200:
+                            result = response.json()
+                            # Store in session state
+                            st.session_state.market_size_result = result
+                        else:
+                            st.error(f"Error: Server returned status {response.status_code}")
+                            st.code(response.text)
+                            return
+                            
+                    # Replace the display section with this improved version:
+                    if result.get("status") == "success":
+                        st.success("Analysis complete!")
                         
-                        if "products_analyzed" in result:
-                            if isinstance(result["products_analyzed"], int):
-                                st.write(f"**Products analyzed:** {result['products_analyzed']}")
-                            else:
-                                st.write(f"**Products analyzed:** {len(result['products_analyzed'])}")
-                else:
-                    st.error(f"Failed to generate visualization: {result.get('message', 'Unknown error')}")
+                        # Display market summary with better formatting
+                        if result.get("market_summary"):
+                            st.markdown(result["market_summary"])
+                        
+                        # Display metrics in three columns with better error handling and formatting
+                        st.subheader("Market Size Metrics")
+                        col1, col2, col3 = st.columns(3)
+                        
+                        with col1:
+                            tam_value = result["market_size"]["TAM"] if result["market_size"]["TAM"] else "Not available"
+                            st.metric("Total Addressable Market (TAM)", tam_value)
+                            st.caption("The total market demand for a product or service")
+                        
+                        with col2:
+                            sam_value = result["market_size"]["SAM"] if result["market_size"]["SAM"] else "Not available"
+                            st.metric("Serviceable Available Market (SAM)", sam_value)
+                            st.caption("The segment of TAM targeted by your products/services")
+                        
+                        with col3:
+                            som_value = result["market_size"]["SOM"] if result["market_size"]["SOM"] else "Not available"
+                            st.metric("Serviceable Obtainable Market (SOM)", som_value)
+                            st.caption("The portion of SAM that can be captured")
+                        
+                        # Display Data Sources section
+                        st.subheader("Data Sources")
+                        with st.expander("View Source Information", expanded=True):
+                            st.markdown(f"**Documents analyzed:** {result.get('documents_analyzed', 15)}")
+                            
+                            # Show companies analyzed
+                            if result.get("companies_analyzed") and len(result["companies_analyzed"]) > 0:
+                                companies = ", ".join(result["companies_analyzed"])
+                                st.markdown(f"**Companies analyzed:** {companies}")
+                            
+                            # Show sources in a list format
+                            if result.get("sources") and len(result["sources"]) > 0:
+                                st.markdown("**Source documents:**")
+                                for source in result["sources"]:
+                                    st.markdown(f"- {source}")
+                    else:
+                        st.error(f"Error: {result.get('message', 'Unknown error')}")
+                        
+                        # Show fallback data if available
+                        if result.get("market_size"):
+                            st.warning("Showing available data despite errors:")
+                            
+                            col1, col2, col3 = st.columns(3)
+                            with col1:
+                                tam_value = result["market_size"].get("TAM") or "Not available"
+                                st.metric("Total Addressable Market (TAM)", tam_value)
+                            
+                            with col2:
+                                sam_value = result["market_size"].get("SAM") or "Not available"
+                                st.metric("Serviceable Available Market (SAM)", sam_value)
+                            
+                            with col3:
+                                som_value = result["market_size"].get("SOM") or "Not available"
+                                st.metric("Serviceable Obtainable Market (SOM)", som_value)
+                                
+                except Exception as e:
+                    st.error(f"Error analyzing market size: {str(e)}")
+                    st.code(f"Exception details: {type(e).__name__}: {str(e)}")
+                    st.info("Try refreshing the page or selecting a different segment.")
+        
+        # Add vector search functionality
+        st.subheader("Segment Data Search")
+        st.markdown("Search for specific information within segment Form 10Q reports")
+        
+        search_query = st.text_input("Enter search query:", placeholder="market growth rate in diagnostic segment")
+        search_button = st.button("Search")
+        
+        if search_button and search_query:
+            with st.spinner("Searching and summarizing..."):
+                try:
+                    # Call the new endpoint
+                    segment_url = get_mcp_server_url(selected_segment)
                     
-                    # Check server status directly
-                    segment_url = get_mcp_server_url("segment")
-                    try:
-                        status_res = requests.get(f"{segment_url}/health", timeout=1)
-                        if status_res.status_code != 200:
-                            st.warning("⚠️ Segment MCP Server may not be running properly.")
-                    except:
-                        st.warning("⚠️ Segment MCP Server connection failed.")
+                    # Add this right before your search request for debugging
+                    st.info(f"Using server URL: {segment_url} for segment: {selected_segment}")
                     
-                    # Provide guidance on next steps
-                    st.warning("""
-                    To generate visualizations, you need to:
-                    1. First upload sales data using the Data Upload tab
-                    2. Make sure the MCP server for your selected segment is running
-                    3. The segment must have product trends data available
-                    """)
-    
-    
+                    response = requests.post(
+                        f"{segment_url}/direct/vector_search_and_summarize",
+                        params={"query": search_query, "top_k": 5},
+                        timeout=60
+                    )
+                    
+                    if response.status_code == 200:
+                        result = response.json()
+                        if result.get("status") == "success":
+                            st.success("Query answered successfully!")
+                            st.write(f"**Answer:** {result['answer']}")
+                            
+                            # Optionally display the chunks
+                            with st.expander("View relevant chunks"):
+                                for i, chunk in enumerate(result["chunks"]):
+                                    st.markdown(f"**Chunk {i+1}:** {chunk}")
+                        else:
+                            st.warning(f"No results: {result.get('message', 'Unknown error')}")
+                    else:
+                        st.error(f"Search failed with status code: {response.status_code}")
+                except Exception as e:
+                    st.error(f"Search failed: {str(e)}")
 
+    
 show()

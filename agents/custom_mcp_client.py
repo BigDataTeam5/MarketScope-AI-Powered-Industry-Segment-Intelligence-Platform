@@ -7,6 +7,7 @@ import aiohttp
 import asyncio
 from typing import Dict, Any, List, Optional, Union
 import os
+import requests
 
 # Import Config
 try:
@@ -180,65 +181,80 @@ class CustomMCPClient:
 
 
 class MCPClient:
-    """MCP Client wrapper for different services"""
+    """Synchronous client for MCP servers"""
     
-    # Map of service names to their base URLs
-    SERVICE_URLS = {
-        "snowflake": "http://localhost:8004",  
-        "market_analysis": "http://localhost:8001",
-        "segment": "http://localhost:8003",
-        "sales_analytics": "http://localhost:8002",
-        "unified": f"http://localhost:{Config.MCP_PORT}",
-        "marketscope": f"http://localhost:{Config.MCP_PORT}"
-    }
-    
-    # Class-level event loop manager
-    _loop_manager = EventLoopManager()
-    _clients: Dict[str, CustomMCPClient] = {}
-    _lock = asyncio.Lock()
-    
-    def __init__(self, service_name: str):
-        """Initialize an MCP client for a specific service"""
-        if service_name not in self.SERVICE_URLS:
-            raise ValueError(f"Unknown service: {service_name}")
+    def __init__(self, base_url):
+        self.base_url = base_url
+        logger.info(f"Initialized MCPClient with URL: {base_url}")
         
-        # Get service URL with environment override
-        service_url = os.environ.get(
-            f"{service_name.upper()}_MCP_URL",
-            self.SERVICE_URLS[service_name]
-        )
-        
-        self.service_name = service_name
-        self.service_url = service_url
-    
-    async def _get_client(self) -> CustomMCPClient:
-        """Get or create a CustomMCPClient instance"""
-        async with self._lock:
-            if self.service_name not in self._clients:
-                self._clients[self.service_name] = CustomMCPClient(self.service_url)
-            return self._clients[self.service_name]
-    
-    async def get_tools(self, force_refresh: bool = False) -> List[Dict[str, Any]]:
-        """Get tools from the service"""
-        client = await self._get_client()
-        return await client.get_tools(force_refresh)
-    
-    async def invoke(self, tool_name: str, parameters: Dict[str, Any]) -> Any:
-        """Invoke a tool on the service"""
-        client = await self._get_client()
-        return await client.invoke(tool_name, parameters)
-    
-    def invoke_sync(self, tool_name: str, parameters: Dict[str, Any]) -> Any:
-        """Synchronous version of invoke"""
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+    def invoke(self, tool_name, params=None):
+        """Invoke a tool synchronously"""
         try:
-            return loop.run_until_complete(self.invoke(tool_name, parameters))
-        finally:
-            loop.close()
+            response = requests.post(
+                f"{self.base_url}/invoke/{tool_name}",
+                json=params or {},
+                headers={"Content-Type": "application/json"},
+                timeout=60
+            )
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                logger.error(f"Request failed with status {response.status_code}: {response.text}")
+                return {
+                    "status": "error", 
+                    "message": f"Request failed with status {response.status_code}"
+                }
+        except Exception as e:
+            logger.error(f"Exception invoking MCP tool: {str(e)}")
+            return {
+                "status": "error",
+                "message": f"Error invoking MCP tool: {str(e)}"
+            }
     
-    async def close(self):
-        """Close the client"""
-        if self.service_name in self._clients:
-            await self._clients[self.service_name].close()
-            del self._clients[self.service_name]
+    # Add an alias for compatibility
+    invoke_sync = invoke
+
+
+class SimpleMCPClient:
+    """Simple client for interacting with MCP servers"""
+    
+    def __init__(self, base_url):
+        import logging
+        self.base_url = base_url
+        self.logger = logging.getLogger("mcp_client")
+        print(f"Initialized SimpleMCPClient with base_url: {base_url}")
+    
+    def invoke(self, tool_name, params=None):
+        """Invoke an MCP tool on the server"""
+        import requests
+        try:
+            # The correct endpoint structure for FastMCP
+            url = f"{self.base_url}/invoke/{tool_name}"
+            print(f"Invoking tool: {tool_name} at URL: {url}")
+            
+            response = requests.post(
+                url,
+                json=params or {},
+                headers={"Content-Type": "application/json"},
+                timeout=60
+            )
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                error_msg = f"Request failed with status {response.status_code}: {response.text}"
+                print(f"Error: {error_msg}")
+                return {
+                    "status": "error",
+                    "message": error_msg
+                }
+        except Exception as e:
+            print(f"Exception calling MCP: {str(e)}")
+            return {
+                "status": "error",
+                "message": f"Error invoking MCP tool: {str(e)}"
+            }
+    
+    # Add an alias for compatibility with different client implementations
+    invoke_sync = invoke

@@ -20,12 +20,12 @@ class Config:
     S3_CHUNKS_FILE = os.getenv("S3_CHUNKS_FILE", "S3D7W4_Marketing_Management_chunks.json")
     
     # Pinecone Configuration
-    PINECONE_API_KEY = os.getenv("PINECONE_API_KEY", "")
+    PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")  # Replace with your actual key
     PINECONE_ENV = os.getenv("PINECONE_ENV", "us-east-1")
     PINECONE_INDEX = "marketscope"
     
     # API Keys
-    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+    OPENAI_API_KEY = "your-openai-api-key"  # Replace with your actual key
     ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
     GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
     GROK_API_KEY = os.getenv("GROK_API_KEY")
@@ -52,8 +52,9 @@ class Config:
         "grok-1": {"name": "Grok-1", "provider": "grok"}
     }
     
-    # MCP Server ports
+    # MCP Server configuration
     MCP_PORT = 8000  # Main unified MCP server
+    API_PORT = 8001  # API server port
     SALES_MCP_PORT = 8002  # Sales analytics MCP server
     MARKET_MCP_PORT = 8003  # Market analysis MCP server
     
@@ -107,40 +108,24 @@ class Config:
     
     # Segment Configuration - Moved from segment_servers/config.py
     SEGMENT_CONFIG = {
-        "Diagnostic Segment": {
-            "schema": "DIAGNOSTIC_SEGMENT",
-            "port": 8010,
-            "description": "Tools for diagnostic product sales analysis and marketing"
-        },
-        "Supplement Segment": {
-            "schema": "SUPPLEMENT_SEGMENT",
-            "port": 8011,
-            "description": "Tools for supplement product sales analysis and marketing"
-        },
-        "Otc Pharmaceutical Segment": {
-            "schema": "OTC_PHARMA_SEGMENT",
-            "port": 8012,
-            "description": "Tools for OTC pharmaceutical sales analysis and marketing"
-        },
-        "Fitness Wearable Segment": {
-            "schema": "FITNESS_WEARABLE_SEGMENT",
-            "port": 8013,
-            "description": "Tools for fitness wearable sales analysis and marketing"
-        },
-        "Skin Care Segment": {
-            "schema": "SKINCARE_SEGMENT",
-            "port": 8014,
-            "description": "Tools for skin care product sales analysis and marketing"
-        }
+        "Skin Care Segment": {"port": 8014, "namespace": "skincare"},  # Changed from 8003 to 8014
+        "Healthcare - Diagnostic": {"port": 8015, "namespace": "diagnostics"},
+        "Pharmaceutical": {"port": 8005, "namespace": "otc-pharmaceutical"},
+        "Supplements": {"port": 8006, "namespace": "supplements"},
+        "Segment Analysis": {"port": 8007, "namespace": "segment-analysis"},
+        "Segment Study Reports": {"port": 8008, "namespace": "segment-study-reports"},
+        "Wearables": {"port": 8009, "namespace": "wearables"}
     }
 
     # MCP server names - will be used in the unified agent
     MCP_SERVER_NAMES = {
+        "Skin Care Segment": "skincare_mcp",
+        "Healthcare - Diagnostic": "diagnostics_mcp",
+        "Pharmaceutical": "pharmaceutical_mcp",
         "Diagnostic Segment": "diagnostic_mcp_server",
         "Supplement Segment": "supplement_mcp_server",
         "Otc Pharmaceutical Segment": "otc_pharma_mcp_server",
-        "Fitness Wearable Segment": "fitness_wearable_mcp_server", 
-        "Skin Care Segment": "skincare_mcp_server"
+        "Fitness Wearable Segment": "fitness_wearable_mcp_server"
     }
 
     # Categories for tools to be used in the unified agent
@@ -194,4 +179,32 @@ class Config:
         """Get the configuration for a specific model"""
         model_name = model_name or cls.DEFAULT_MODEL
         return cls.AVAILABLE_MODELS.get(model_name, {"name": model_name, "provider": "unknown"})
+
+    @classmethod
+    def get_pinecone_api_key(cls):
+        """Get Pinecone API key from multiple possible sources"""
+        # Check environment variable first
+        import os
+        env_key = os.environ.get("PINECONE_API_KEY")
+        if env_key:
+            return env_key
+        
+        # Then check config value
+        if hasattr(cls, "PINECONE_API_KEY") and cls.PINECONE_API_KEY:
+            return cls.PINECONE_API_KEY
+        
+        # Try to load from local secrets file as fallback
+        try:
+            secrets_path = os.path.join(os.path.dirname(__file__), "secrets.json")
+            if os.path.exists(secrets_path):
+                import json
+                with open(secrets_path, "r") as f:
+                    secrets = json.load(f)
+                    if "pinecone_api_key" in secrets:
+                        return secrets["pinecone_api_key"]
+        except Exception as e:
+            print(f"Error reading secrets: {e}")
+        
+        # No valid key found
+        return None
 
