@@ -1,61 +1,115 @@
 """
-LiteLLM Service Module for MarketScope
-Initializes LiteLLM with configuration from Config class
+LiteLLM service integration for MarketScope
+Provides standardized access to LLM models
 """
 import os
-import litellm
-from typing import List, Dict, Any, Optional, Callable
-from langchain.tools import BaseTool
-from .config import Config
+import logging
+from typing import Optional, Dict, Any, List
 
-class LiteLLMService:
-    """Service class to handle LiteLLM configuration and operations"""
-    
-    def __init__(self):
-        """Initialize LiteLLM service with default settings"""
-        self.current_model = "gpt-4o"  # Hardcoded to gpt-4o
-        self.temperature = Config.DEFAULT_TEMPERATURE
-        self._configure_api_keys()
-    
-    def _configure_api_keys(self):
-        """Configure API keys for all supported providers"""
-        if Config.OPENAI_API_KEY:
-            os.environ["OPENAI_API_KEY"] = Config.OPENAI_API_KEY
-        if Config.ANTHROPIC_API_KEY:
-            os.environ["ANTHROPIC_API_KEY"] = Config.ANTHROPIC_API_KEY
-        if Config.GOOGLE_API_KEY:
-            os.environ["GOOGLE_API_KEY"] = Config.GOOGLE_API_KEY
-        if Config.GROK_API_KEY:
-            os.environ["XAI_API_KEY"] = Config.GROK_API_KEY
-        if Config.DEEPSEEK_API_KEY:
-            os.environ["DEEPSEEK_API_KEY"] = Config.DEEPSEEK_API_KEY
-    
-    def get_model(self, model_name: str = None) -> str:
-        """Get the appropriate LiteLLM model name for the selected model"""
-        return "gpt-4o"  # Always return gpt-4o regardless of input
-    
-    def __call__(self, messages, model=None, temperature=None, **kwargs):
-        """Call the LLM service with configured settings"""
-        model = model or self.current_model
-        temperature = temperature or self.temperature
-        model_name = self.get_model(model)
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("litellm_service")
 
+# Import Config for default model settings
+try:
+    from config.config import Config
+except ImportError:
+    # Fallback if Config is not available
+    class Config:
+        DEFAULT_MODEL = "gpt-4o"
+        DEFAULT_TEMPERATURE = 0.3
+        OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+        ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+        GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+
+def get_llm_model(model_name: Optional[str] = None, temperature: Optional[float] = None):
+    """
+    Get a language model instance using LiteLLM
+    
+    Args:
+        model_name: Name of the model to use (defaults to Config.DEFAULT_MODEL)
+        temperature: Temperature setting (defaults to Config.DEFAULT_TEMPERATURE)
+        
+    Returns:
+        LangChain compatible model
+    """
+    try:
+# Import LiteLLM and related packages
         try:
-            response = litellm.completion(
-                model=model_name,
-                messages=messages,
-                temperature=temperature,
-                **kwargs
-            )
-            # Properly extract message content from response
-            if hasattr(response, 'choices') and len(response.choices) > 0:
-                if hasattr(response.choices[0], 'message'):
-                    return response.choices[0].message
-                else:
-                    return str(response.choices[0])
-            return str(response)
-        except Exception as e:
-            raise Exception(f"LiteLLM call failed: {str(e)}")
+            import litellm
+            from langchain_community.llms.litellm import LiteLLM
+        except ImportError:
+            try:
+                import litellm
+                # Fallback for older langchain versions
+                from langchain.llms.litellm import LiteLLM
+            except ImportError:
+                # Try to install the package if it's missing
+                import subprocess
+                import sys
+                subprocess.check_call([sys.executable, "-m", "pip", "install", "langchain-community", "litellm"])
+                import litellm
+                from langchain_community.llms.litellm import LiteLLM
+        
+        # Set default API keys
+        litellm.openai_api_key = os.getenv("OPENAI_API_KEY", Config.OPENAI_API_KEY)
+        litellm.anthropic_api_key = os.getenv("ANTHROPIC_API_KEY", Config.ANTHROPIC_API_KEY)
+        litellm.google_api_key = os.getenv("GOOGLE_API_KEY", Config.GOOGLE_API_KEY)
+        
+        # Set model name and temperature
+        model = model_name or Config.DEFAULT_MODEL
+        temp = temperature if temperature is not None else Config.DEFAULT_TEMPERATURE
+        
+        # Create and return LiteLLM instance
+        return LiteLLM(
+            model=model,
+            temperature=temp,
+            streaming=True
+        )
+    
+    except ImportError as e:
+        logger.error(f"Error importing LiteLLM: {str(e)}")
+        logger.warning("Falling back to mock LLM for development")
+        
+        # Fallback to mock LLM for development
+        from langchain_community.llms.fake import FakeListLLM
+        
+        return FakeListLLM(
+            responses=["I'm a mock LLM model for development. LiteLLM could not be imported."]
+        )
+    except Exception as e:
+        logger.error(f"Error initializing LLM model: {str(e)}")
+        
+        # Return a more informative error message
+        from langchain_community.llms.fake import FakeListLLM
+        return FakeListLLM(
+            responses=[f"Error initializing LLM model: {str(e)}. Please check your API keys and model configuration."]
+        )
 
-# Create a singleton instance
-litellm_service = LiteLLMService()
+def get_embeddings_model():
+    """
+    Get an embeddings model
+    
+    Returns:
+        Embeddings model instance
+    """
+    try:
+        from langchain_openai import OpenAIEmbeddings
+        
+        return OpenAIEmbeddings(
+            model="text-embedding-ada-002",
+            openai_api_key=os.getenv("OPENAI_API_KEY", Config.OPENAI_API_KEY)
+        )
+    except ImportError:
+        logger.error("Error importing OpenAIEmbeddings")
+        try:
+            # Try older langchain version
+            from langchain.embeddings.openai import OpenAIEmbeddings
+            return OpenAIEmbeddings(
+                model_name="text-embedding-ada-002",
+                openai_api_key=os.getenv("OPENAI_API_KEY", Config.OPENAI_API_KEY)
+            )
+        except ImportError:
+            # Return a mock embeddings model
+            from langchain_community.embeddings.fake import FakeEmbeddings
+            return FakeEmbeddings(size=1536)

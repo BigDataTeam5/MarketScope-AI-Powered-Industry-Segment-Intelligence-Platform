@@ -1,13 +1,25 @@
 import streamlit as st
-from frontend.utils import sidebar
+
 import sys
 import os
 
 # Add root directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
+from frontend.utils import sidebar
 # Set page config to full width
 st.set_page_config(layout="wide")
+
+# Initialize session state variables that need to be shared across pages
+if "selected_segment" not in st.session_state:
+    st.session_state.selected_segment = None
+if "sales_data" not in st.session_state:
+    st.session_state.sales_data = None
+if "snowflake_uploaded" not in st.session_state:
+    st.session_state.snowflake_uploaded = False
+if "analysis_result" not in st.session_state:
+    st.session_state.analysis_result = None
+if "trends_result" not in st.session_state:
+    st.session_state.trends_result = None
 
 def show():
     """Show main app interface"""
@@ -33,16 +45,6 @@ def show():
     3. Enter your query or requirements
     """)
     
-    # --- Upload sales product data ---
-    st.markdown("### Upload Your Sales/Product Data")
-    uploaded_file = st.file_uploader(
-        "Upload a CSV or Excel file containing your sales or product data for analysis.",
-        type=["csv", "xlsx"]
-    )
-    if uploaded_file is not None:
-        st.success(f"File '{uploaded_file.name}' uploaded successfully!")
-        # You can add further processing here if needed
-
     # Display current segment if selected
     if st.session_state.get("selected_segment"):
         st.info(f"Currently analyzing: **{st.session_state.selected_segment}**")

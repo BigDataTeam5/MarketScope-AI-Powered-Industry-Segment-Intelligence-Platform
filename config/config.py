@@ -65,6 +65,62 @@ class Config:
         }
     }
     
+    # Segment Configuration - Moved from segment_servers/config.py
+    SEGMENT_CONFIG = {
+        "Diagnostic Segment": {
+            "schema": "DIAGNOSTIC_SEGMENT",
+            "port": 8010,
+            "description": "Tools for diagnostic product sales analysis and marketing"
+        },
+        "Supplement Segment": {
+            "schema": "SUPPLEMENT_SEGMENT",
+            "port": 8011,
+            "description": "Tools for supplement product sales analysis and marketing"
+        },
+        "Otc Pharmaceutical Segment": {
+            "schema": "OTC_PHARMA_SEGMENT",
+            "port": 8012,
+            "description": "Tools for OTC pharmaceutical sales analysis and marketing"
+        },
+        "Fitness Wearable Segment": {
+            "schema": "FITNESS_WEARABLE_SEGMENT",
+            "port": 8013,
+            "description": "Tools for fitness wearable sales analysis and marketing"
+        },
+        "Skin Care Segment": {
+            "schema": "SKINCARE_SEGMENT",
+            "port": 8014,
+            "description": "Tools for skin care product sales analysis and marketing"
+        }
+    }
+
+    # MCP server names - will be used in the unified agent
+    MCP_SERVER_NAMES = {
+        "Diagnostic Segment": "diagnostic_mcp_server",
+        "Supplement Segment": "supplement_mcp_server",
+        "Otc Pharmaceutical Segment": "otc_pharma_mcp_server",
+        "Fitness Wearable Segment": "fitness_wearable_mcp_server", 
+        "Skin Care Segment": "skincare_mcp_server"
+    }
+
+    # Categories for tools to be used in the unified agent
+    TOOL_CATEGORIES = {
+        "Diagnostic Segment": "diagnostic",
+        "Supplement Segment": "supplement",
+        "Otc Pharmaceutical Segment": "otc_pharma",
+        "Fitness Wearable Segment": "fitness", 
+        "Skin Care Segment": "skincare"
+    }
+
+    # Store common tools to be registered by each MCP server
+    COMMON_TOOL_NAMES = [
+        "upload_to_snowflake",
+        "get_product_list",
+        "analyze_product_trends",
+        "create_sales_visualization",
+        "generate_sales_summary"
+    ]
+    
     @classmethod
     def get_agent_class(cls, agent_name: str) -> Type:
         """Get the agent class from the fully qualified class name."""
