@@ -30,7 +30,8 @@
 ## 🔧 Architecture Overview
 
 ![alt text](image.png)
-![image](https://github.com/user-attachments/assets/60a8fa36-eb5f-4ae2-a0bd-d2f45c4e2c68)
+
+![diagram-export-4-18-2025-2_51_50-PM](https://github.com/user-attachments/assets/b71bc874-d979-4f89-8c0a-8597c17368d5)
 
 
 - **Frontend**: Streamlit (exploratory dashboard)
