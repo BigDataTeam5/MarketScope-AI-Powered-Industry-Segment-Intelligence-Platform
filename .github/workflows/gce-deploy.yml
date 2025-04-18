@@ -1,5 +1,4 @@
 name: Deploy to Google Compute Engine
-
 on:
   push:
     branches: [ main ]
@@ -11,110 +10,81 @@ on:
         description: 'Environment to deploy to'
         required: true
         default: 'production'
-
 jobs:
   build-and-deploy:
     name: Build and Deploy
     runs-on: ubuntu-latest
-
     env:
       PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
       GCE_INSTANCE: instance-20250410-022144
       GCE_INSTANCE_ZONE: us-central1-f
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
+      
       - name: Set up Python 3.10
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
-
+      
       - name: Install Poetry
         run: |
           curl -sSL https://install.python-poetry.org | POETRY_VERSION=1.6.1 python3 -
           echo "$HOME/.local/bin" >> $GITHUB_PATH
-
+      
       - name: Configure Poetry
         run: |
           poetry config virtualenvs.create false
-
+      
       - name: Install dependencies
         run: |
           poetry install --no-interaction --no-ansi
-
+      
       - name: Run tests
         run: |
           pytest tests/ -v || echo "Tests completed with warnings"
-
+      
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v1
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
-
+      
       - name: Install gcloud CLI
         uses: google-github-actions/setup-gcloud@v1
         with:
           project_id: ${{ secrets.GCP_PROJECT_ID }}
           version: 'latest'
-
+      
       - name: Configure Docker for GCR
         run: |
           gcloud auth configure-docker gcr.io --quiet
-
+      
       - name: Build Docker image
         run: |
           docker build -t marketscope:${{ github.sha }} .
           docker tag marketscope:${{ github.sha }} gcr.io/${{ secrets.GCP_PROJECT_ID }}/marketscope:${{ github.sha }}
-
+      
       - name: Push Docker image to GCR
         run: |
           docker push gcr.io/${{ secrets.GCP_PROJECT_ID }}/marketscope:${{ github.sha }}
-
-          - name: Authenticate to GCP
-          uses: google-github-actions/auth@v1
-          with:
-            credentials_json: ${{ secrets.GCP_SA_KEY }}
-        
-      - name: Install gcloud CLI
-        uses: google-github-actions/setup-gcloud@v1
-        with:
-          project_id: ${{ secrets.GCP_PROJECT_ID }}
-          version: 'latest'
-        
-      # Add this - ensure SSH keys have propagated
+      
+      # Wait for SSH keys to propagate
       - name: Wait for SSH key propagation
         run: sleep 30
-        
-      # Add this - test the SSH connection
+      
+      # Test SSH connection first
       - name: Test SSH Connection
-        run: |
-            gcloud compute ssh --zone ${{ env.GCE_INSTANCE_ZONE }} ${{ env.GCE_INSTANCE }} \
-            --quiet --command "echo 'SSH connection test successful'"
-        
+        run: gcloud compute ssh --zone ${{ env.GCE_INSTANCE_ZONE }} ${{ env.GCE_INSTANCE }} --quiet --command "echo 'SSH connection test successful'"
+      
+      # Deploy with a simplified command format
       - name: Deploy to GCE instance
-        run: |
-            gcloud compute ssh --zone ${{ env.GCE_INSTANCE_ZONE }} ${{ env.GCE_INSTANCE }} --command "
-              cd /opt/marketscope && \
-              echo 'Stopping any existing containers...' && \
-              sudo docker ps -q | xargs -r sudo docker stop && \
-              sudo docker-compose down && \
-              echo 'IMAGE=gcr.io/${{ secrets.GCP_PROJECT_ID }}/marketscope:${{ github.sha }}' > .env && \
-              sudo docker pull gcr.io/${{ secrets.GCP_PROJECT_ID }}/marketscope:${{ github.sha }} && \
-              sudo docker-compose up -d && \
-              echo Deployment completed at \$(date)
-            "   
-
+        run: gcloud compute ssh --zone ${{ env.GCE_INSTANCE_ZONE }} ${{ env.GCE_INSTANCE }} --command "cd /opt/marketscope && echo 'Stopping any existing containers...' && sudo docker ps -q | xargs -r sudo docker stop && sudo docker-compose down && echo 'IMAGE=gcr.io/${{ secrets.GCP_PROJECT_ID }}/marketscope:${{ github.sha }}' > .env && sudo docker pull gcr.io/${{ secrets.GCP_PROJECT_ID }}/marketscope:${{ github.sha }} && sudo docker-compose up -d && echo Deployment completed at \$(date)"
+      
       - name: Check deployment status
         run: |
           sleep 30
-          gcloud compute ssh --zone ${{ env.GCE_INSTANCE_ZONE }} ${{ env.GCE_INSTANCE }} --command "
-            docker ps -a && \
-            echo 'Checking if services are running...' && \
-            curl -s http://localhost:8000/health || echo 'Main service health check failed'
-          "
-
+          gcloud compute ssh --zone ${{ env.GCE_INSTANCE_ZONE }} ${{ env.GCE_INSTANCE }} --command "docker ps -a && echo 'Checking if services are running...' && curl -s http://localhost:8000/health || echo 'Main service health check failed'"
+      
       - name: Post-deployment notification
         if: always()
         run: |
