@@ -1,6 +1,9 @@
 # MarketScope AI: Healthcare Product Analytics 
 
-MarketScope AI is an intelligent analytics platform that helps you understand and analyze different healthcare market segments using advanced AI and natural language processing.
+## 👥 Team Members
+- **Yash Khavnekar** – Data Collection, Web Scraping, Sentiment Analysis (MCP)
+- **Shushil Girish** – Agent Integration, Backend + ETL (LangGraph, FastAPI, Airflow)
+- **Riya Mate** – Frontend, Marketing Automation,Documentation, Codelabs
 
 ## Features
 
@@ -9,7 +12,7 @@ MarketScope AI is an intelligent analytics platform that helps you understand an
 - **Product Comparison** - Compare products across different segments
 - **Sales & Marketing Analysis** - Upload your sales data for AI-powered insights
 
-## Getting Started
+**MarketScope** is a scalable AI-powered market intelligence platform designed to democratize access to industry insights. It integrates **structured data** from Snowflake Marketplace with **real-time unstructured data** like product re pricing from vendors. Informed by foundational marketing literature (e.g., *Philip Kotler’s Marketing Management*), the platform delivers pricing analysis, sentiment breakdowns, and market sizing (TAM/SAM/SOM) to help startups, SMBs, and analysts explore opportunities without costly reports or consultants.
 
 ### Prerequisites
 
@@ -22,8 +25,83 @@ MarketScope AI is an intelligent analytics platform that helps you understand an
 #### Simple Method
 Run the simplified starter script:
 
-```bash
-python run_servers.py
+---
+
+## 🔧 Architecture Overview
+
+![diagram-export-4-18-2025-2_51_50-PM](https://github.com/user-attachments/assets/b71bc874-d979-4f89-8c0a-8597c17368d5)
+
+
+- **Frontend**: Streamlit (exploratory dashboard)
+- **Backend**: FastAPI
+- **Agents**: LangGraph + MCP (Model Context Protocol)
+- **ETL Pipelines**: Apache Airflow
+- **Data Sources**:
+  - Structured: [Snowflake Marketplace – Industry & Segment Data](https://app.snowflake.com/)
+  - Unstructured: Web scraping (reviews) + Web search (pricing)
+
+---
+## File Structure
+```
+MarketScope-AI-Powered-Industry-Segment-Intelligence-Platform/
+│
+├── Airflow/                            # Airflow pipeline components
+│   ├── dags/                           # Airflow DAGs
+│   │   └── book_to_vector_pipeline.py  # PDF processing pipeline
+│   ├── config/                         # Configuration files
+│   │   └── book.json                   # Book processing config
+│   └── utils/                          # Utility modules
+│       ├── mistralparsing_userpdf.py   # PDF parsing
+│       └── chunking.py                 # Text chunking utilities
+│
+├── mcp_server/                         # Master Control Program server
+│   ├── __init__.py
+│   ├── server.py                       # Main MCP server implementation
+│   ├── config.py                       # Server configuration
+│   ├── models.py                       # Data models for MCP
+│   ├── utils/                          # MCP utilities
+│   │   ├── __init__.py
+│   │   ├── auth.py                     # Authentication utilities
+│   │   └── logging.py                  # Logging configuration
+│   └── services/                       # Core MCP services
+│       ├── __init__.py
+│       ├── session_manager.py          # Session management
+│       ├── agent_registry.py           # Agent registration/discovery 
+│       └── task_queue.py               # Task scheduling
+│
+├── agents/                             # Specialized agents
+│   ├── __init__.py
+│   ├── base_agent.py                   # Base agent class
+│   ├── analysis_agent/                 # Analysis agent
+│   │   ├── __init__.py
+│   │   ├── server.py                   # Analysis agent server
+│   │   └── analyzers/                  # Analysis modules
+│   │       └── market_analyzer.py      # Market analysis
+│   │
+│   ├── research_agent/                 # Research agent
+│   │   ├── __init__.py
+│   │   ├── server.py                   # Research agent server
+│   │   └── knowledge_base.py           # Knowledge retrieval
+│   │
+│   └── marketing_agent/                # Marketing agent
+│       ├── __init__.py
+│       ├── server.py                   # Marketing agent server
+│       └── generators/                 # Content generation
+│           └── content_generator.py    # Marketing content
+│
+├── client/                             # Client applications
+│   ├── cli/                            # Command line interface
+│   │   └── marketscope_cli.py          # CLI tool
+│   └── web/                            # Web interface
+│       ├── app.py                      # Web app
+│       ├── static/                     # Static assets
+│       └── templates/                  # HTML templates
+│
+├── setup_pinecone.py                   # Pinecone setup script
+├── requirements.txt                    # Dependencies
+├── .env.example                        # Example environment variables
+├── README.md                           # Project documentation
+└── docker-compose.yml                  # Container orchestration
 ```
 
 This will:
@@ -57,7 +135,10 @@ streamlit run frontend/app.py
 - `agents/` - AI agents for analysis
 - `config/` - Application configuration
 
-## Healthcare Segments
+- **Frontend + Backend**: GCP Cloud Run (containerized with Docker)
+- **Pipelines**: Cloud Composer (Airflow DAG orchestration)
+- **CI/CD**: GitHub Actions for pipeline updates and app deployment
+- **Secrets & Cache**:  GCP Secret Manager
 
 The platform supports analysis across these healthcare segments:
 
@@ -76,7 +157,9 @@ To analyze your sales data:
 3. Upload your CSV file or use the sample data
 4. Click "Analyze Data"
 
-## RAG for Marketing Knowledge
+- Democratize access to industry research insights
+- Automate market sizing (TAM/SAM/SOM) and tier classification
+- Provide book-informed strategic Q&A based on marketing theory
 
 MarketScope includes a Retrieval Augmented Generation (RAG) system that provides access to marketing knowledge from Philip Kotler's Marketing Management book:
 
