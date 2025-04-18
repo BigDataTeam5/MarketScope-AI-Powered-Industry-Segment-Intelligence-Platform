@@ -147,138 +147,167 @@ def show():
         if "market_size_result" in st.session_state:
             del st.session_state.market_size_result
             
-    if perform_analysis or "market_size_result" in st.session_state:
-        with st.spinner(f"Analyzing market size for {selected_segment}..."):
-            try:
-                # Use cached result if available, otherwise fetch from server
-                if "market_size_result" in st.session_state and not refresh_analysis:
-                    result = st.session_state.market_size_result
-                    st.info("Using cached analysis results. Click 'Clear & Refresh' for fresh data.")
-                else:
-                    # Direct API call to get market size data
+        if refresh_analysis:
+            # Clear any cached results
+            if "market_size_result" in st.session_state:
+                del st.session_state.market_size_result
+                
+        if perform_analysis or "market_size_result" in st.session_state:
+            with st.spinner(f"Analyzing market size for {selected_segment}..."):
+                try:
+                    # Use cached result if available, otherwise fetch from server
+                    if "market_size_result" in st.session_state and not refresh_analysis:
+                        result = st.session_state.market_size_result
+                        st.info("Using cached analysis results. Click 'Clear & Refresh' for fresh data.")
+                    else:
+                        # Direct API call to get market size data
+                        segment_url = get_mcp_server_url(selected_segment)
+                        
+                        response = requests.post(
+                            f"{segment_url}/direct/analyze_market_size",
+                            params={"segment": selected_segment},
+                            timeout=60
+                        )
+                        
+                        if response.status_code == 200:
+                            result = response.json()
+                            # Store in session state
+                            st.session_state.market_size_result = result
+                        else:
+                            st.error(f"Error: Server returned status {response.status_code}")
+                            st.code(response.text)
+                            return
+                            
+                    # Replace the display section with this improved version:
+                    if result.get("status") == "success":
+                        st.success("Analysis complete!")
+                        
+                        # Display market summary with better formatting
+                        if result.get("market_summary"):
+                            st.markdown(result["market_summary"])
+                        
+                        # Display metrics in three columns with better error handling and formatting
+                        st.subheader("Market Size Metrics")
+                        col1, col2, col3 = st.columns(3)
+                        
+                        with col1:
+                            tam_value = result["market_size"]["TAM"] if result["market_size"]["TAM"] else "Not available"
+                            st.metric("Total Addressable Market (TAM)", tam_value)
+                            st.caption("The total market demand for a product or service")
+                        
+                        with col2:
+                            sam_value = result["market_size"]["SAM"] if result["market_size"]["SAM"] else "Not available"
+                            st.metric("Serviceable Available Market (SAM)", sam_value)
+                            st.caption("The segment of TAM targeted by your products/services")
+                        
+                        with col3:
+                            som_value = result["market_size"]["SOM"] if result["market_size"]["SOM"] else "Not available"
+                            st.metric("Serviceable Obtainable Market (SOM)", som_value)
+                            st.caption("The portion of SAM that can be captured")
+                        
+                        # Display Data Sources section
+                        st.subheader("Data Sources")
+                        with st.expander("View Source Information", expanded=True):
+                            st.markdown(f"**Documents analyzed:** {result.get('documents_analyzed', 15)}")
+                            
+                            # Show companies analyzed
+                            if result.get("companies_analyzed") and len(result["companies_analyzed"]) > 0:
+                                companies = ", ".join(result["companies_analyzed"])
+                                st.markdown(f"**Companies analyzed:** {companies}")
+                            
+                            # Show sources in a list format
+                            if result.get("sources") and len(result["sources"]) > 0:
+                                st.markdown("**Source documents:**")
+                                for source in result["sources"]:
+                                    st.markdown(f"- {source}")
+                    else:
+                        st.error(f"Error: {result.get('message', 'Unknown error')}")
+                        
+                        # Show fallback data if available
+                        if result.get("market_size"):
+                            st.warning("Showing available data despite errors:")
+                            
+                            col1, col2, col3 = st.columns(3)
+                            with col1:
+                                tam_value = result["market_size"].get("TAM") or "Not available"
+                                st.metric("Total Addressable Market (TAM)", tam_value)
+                            
+                            with col2:
+                                sam_value = result["market_size"].get("SAM") or "Not available"
+                                st.metric("Serviceable Available Market (SAM)", sam_value)
+                            
+                            with col3:
+                                som_value = result["market_size"].get("SOM") or "Not available"
+                                st.metric("Serviceable Obtainable Market (SOM)", som_value)
+                                
+                except Exception as e:
+                    st.error(f"Error analyzing market size: {str(e)}")
+                    st.code(f"Exception details: {type(e).__name__}: {str(e)}")
+                    st.info("Try refreshing the page or selecting a different segment.")
+        
+        # Replace the Segment Data Search section with this improved version
+        st.subheader("Segment Data Search")
+        st.markdown("Search for specific information within segment Form 10Q reports")
+
+        search_query = st.text_input("Enter search query:", placeholder="market growth rate in diagnostic segment")
+        search_button = st.button("Search")
+
+        if search_button and search_query:
+            with st.spinner("Searching relevant documents and generating insights..."):
+                try:
+                    # Get the server URL for the selected segment
                     segment_url = get_mcp_server_url(selected_segment)
                     
+                    # Call the vector search endpoint
                     response = requests.post(
-                        f"{segment_url}/direct/analyze_market_size",
-                        params={"segment": selected_segment},
-                        timeout=60
+                        f"{segment_url}/direct/vector_search_and_summarize",
+                        params={"query": search_query, "segment": selected_segment, "top_k": 5},
+                        timeout=90  # Increased timeout for LLM processing
                     )
                     
                     if response.status_code == 200:
                         result = response.json()
-                        # Store in session state
-                        st.session_state.market_size_result = result
-                    else:
-                        st.error(f"Error: Server returned status {response.status_code}")
-                        st.code(response.text)
-                        return
                         
-                # Replace the display section with this improved version:
-                if result.get("status") == "success":
-                    st.success("Analysis complete!")
-                    
-                    # Display market summary with better formatting
-                    if result.get("market_summary"):
-                        st.markdown(result["market_summary"])
-                    
-                    # Display metrics in three columns with better error handling and formatting
-                    st.subheader("Market Size Metrics")
-                    col1, col2, col3 = st.columns(3)
-                    
-                    with col1:
-                        tam_value = result["market_size"]["TAM"] if result["market_size"]["TAM"] else "Not available"
-                        st.metric("Total Addressable Market (TAM)", tam_value)
-                        st.caption("The total market demand for a product or service")
-                    
-                    with col2:
-                        sam_value = result["market_size"]["SAM"] if result["market_size"]["SAM"] else "Not available"
-                        st.metric("Serviceable Available Market (SAM)", sam_value)
-                        st.caption("The segment of TAM targeted by your products/services")
-                    
-                    with col3:
-                        som_value = result["market_size"]["SOM"] if result["market_size"]["SOM"] else "Not available"
-                        st.metric("Serviceable Obtainable Market (SOM)", som_value)
-                        st.caption("The portion of SAM that can be captured")
-                    
-                    # Display Data Sources section
-                    st.subheader("Data Sources")
-                    with st.expander("View Source Information", expanded=True):
-                        st.markdown(f"**Documents analyzed:** {result.get('documents_analyzed', 15)}")
-                        
-                        # Show companies analyzed
-                        if result.get("companies_analyzed") and len(result["companies_analyzed"]) > 0:
-                            companies = ", ".join(result["companies_analyzed"])
-                            st.markdown(f"**Companies analyzed:** {companies}")
-                        
-                        # Show sources in a list format
-                        if result.get("sources") and len(result["sources"]) > 0:
-                            st.markdown("**Source documents:**")
-                            for source in result["sources"]:
-                                st.markdown(f"- {source}")
-                else:
-                    st.error(f"Error: {result.get('message', 'Unknown error')}")
-                    
-                    # Show fallback data if available
-                    if result.get("market_size"):
-                        st.warning("Showing available data despite errors:")
-                        
-                        col1, col2, col3 = st.columns(3)
-                        with col1:
-                            tam_value = result["market_size"].get("TAM") or "Not available"
-                            st.metric("Total Addressable Market (TAM)", tam_value)
-                        
-                        with col2:
-                            sam_value = result["market_size"].get("SAM") or "Not available"
-                            st.metric("Serviceable Available Market (SAM)", sam_value)
-                        
-                        with col3:
-                            som_value = result["market_size"].get("SOM") or "Not available"
-                            st.metric("Serviceable Obtainable Market (SOM)", som_value)
+                        if result.get("status") == "success":
+                            st.success("Analysis complete!")
                             
-            except Exception as e:
-                st.error(f"Error analyzing market size: {str(e)}")
-                st.code(f"Exception details: {type(e).__name__}: {str(e)}")
-                st.info("Try refreshing the page or selecting a different segment.")
-    
-    # Add vector search functionality
-    st.subheader("Segment Data Search")
-    st.markdown("Search for specific information within segment Form 10Q reports")
-    
-    search_query = st.text_input("Enter search query:", placeholder="market growth rate in diagnostic segment")
-    search_button = st.button("Search")
-    
-    if search_button and search_query:
-        with st.spinner("Searching and summarizing..."):
-            try:
-                # Call the new endpoint
-                segment_url = get_mcp_server_url(selected_segment)
-                
-                # Add this right before your search request for debugging
-                st.info(f"Using server URL: {segment_url} for segment: {selected_segment}")
-                
-                response = requests.post(
-                    f"{segment_url}/direct/vector_search_and_summarize",
-                    params={"query": search_query, "top_k": 5},
-                    timeout=60
-                )
-                
-                if response.status_code == 200:
-                    result = response.json()
-                    if result.get("status") == "success":
-                        st.success("Query answered successfully!")
-                        st.write(f"**Answer:** {result['answer']}")
-                        
-                        # Optionally display the chunks
-                        with st.expander("View relevant chunks"):
-                            for i, chunk in enumerate(result["chunks"]):
-                                st.markdown(f"**Chunk {i+1}:** {chunk}")
+                            # Display the answer in a highlighted box
+                            st.markdown("### Answer")
+                            st.info(result["answer"])
+                            
+                            # Display source information
+                            st.markdown("### Sources")
+                            if "chunk_count" in result:
+                                st.caption(f"Analysis based on {result['chunk_count']} relevant document excerpts")
+                            
+                            # Display detailed chunks in an expander
+                            with st.expander("View Source Excerpts"):
+                                for i, chunk in enumerate(result.get("chunks", [])):
+                                    st.markdown(f"**Excerpt {i+1}:**")
+                                    
+                                    # Try to display source information
+                                    if i < len(result.get("sources", [])) and result["sources"][i]:
+                                        source = result["sources"][i]
+                                        source_info = []
+                                        if "company" in source:
+                                            source_info.append(f"Company: {source['company']}")
+                                        if "date" in source:
+                                            source_info.append(f"Date: {source['date']}")
+                                        if "file" in source:
+                                            source_info.append(f"File: {source['file']}")
+                                        if source_info:
+                                            st.caption(" | ".join(source_info))
+                                    
+                                    # Display chunk text in a code block for better readability
+                                    st.text_area("", chunk, height=100, key=f"chunk_{i}")
+                                    st.markdown("---")
+                        else:
+                            st.error(f"Search failed: {result.get('message', 'Unknown error')}")
                     else:
-                        st.warning(f"No results: {result.get('message', 'Unknown error')}")
-                else:
-                    st.error(f"Search failed with status code: {response.status_code}")
-            except Exception as e:
-                st.error(f"Search failed: {str(e)}")
-    
-
-    
+                        st.error(f"API request failed with status code: {response.status_code}")
+                        st.code(response.text)
+                
+                except Exception as e:
+                    st.error(f"Search failed: {str(e)}")
+                    
 show()

@@ -16,6 +16,12 @@ import seaborn as sns
 import warnings
 import sys
 import logging
+import numpy as np
+from matplotlib.ticker import FuncFormatter
+import time
+from sentence_transformers import SentenceTransformer
+import pinecone
+
 # Suppress warnings
 warnings.filterwarnings('ignore')
 
@@ -134,13 +140,13 @@ def save_csv_to_local(df, segment_name):
 
 # Function to upload data to Snowflake with proper error handling
 async def upload_to_snowflake(df, segment_name):
-    # Initialize the Snowflake MCP client - use "snowflake" service directly
+    # Initialize the Snowflake MCP client
     snowflake_mcp_client = None
     try:
         # Minimized logging
         st.info("Connecting to Snowflake MCP server...")
         
-        # Create and configure MCP client using the proper MCPClient class
+        # Create and configure MCP client
         from agents.custom_mcp_client import MCPClient
         snowflake_mcp_client = MCPClient("snowflake")
         
@@ -154,7 +160,7 @@ async def upload_to_snowflake(df, segment_name):
                     "message": "Snowflake MCP server is not available - no tools found"
                 }
             
-            # Check if the required tool exists - properly handle tools list format
+            # Check if the required tool exists
             tool_exists = False
             if isinstance(tools, list):
                 tool_exists = any(tool.get("name") == "load_csv_to_table" for tool in tools)
@@ -187,20 +193,26 @@ async def upload_to_snowflake(df, segment_name):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         table_name = f"SALES_DATA_{timestamp}"
         
-        # Use Snowflake MCP client to load data
+        # Convert segment name to a valid schema name (uppercase, replace spaces with underscores)
+        schema_name = segment_name.upper().replace(" ", "_").replace("-", "_")
+        
+        # Use Snowflake MCP client to load data with segment-based schema
         response = await snowflake_mcp_client.invoke(
             "load_csv_to_table", 
             {
                 "table_name": table_name,
                 "csv_data": csv_string,
                 "create_table": True,
-                "segment_name": segment_name
+                "segment_name": segment_name,
+                "schema": schema_name,                # Use segment as schema name
+                "database": "MARKETSCOPE",           # Default database
+                "warehouse": "COMPUTE_WH",           # Default warehouse
+                "create_schema_if_not_exists": True  # Automatically create schema if needed
             }
         )
         
-        # Properly handle different response formats
+        # Handle response
         if isinstance(response, dict):
-            # Handle dictionary response format
             if "status" in response and response["status"] == "error":
                 return {
                     "status": "error",
@@ -212,7 +224,6 @@ async def upload_to_snowflake(df, segment_name):
                     "message": response.get("content", str(response))
                 }
         elif isinstance(response, str):
-            # Handle string response format
             if "error" in response.lower():
                 return {
                     "status": "error",
@@ -224,7 +235,6 @@ async def upload_to_snowflake(df, segment_name):
                     "message": response
                 }
         else:
-            # Handle any other response type
             return {
                 "status": "success",
                 "message": str(response)
@@ -235,7 +245,6 @@ async def upload_to_snowflake(df, segment_name):
             "message": f"Snowflake upload error: {str(e)}"
         }
     finally:
-        # Ensure client is properly closed to avoid unclosed session warnings
         if snowflake_mcp_client:
             try:
                 await snowflake_mcp_client.close()
@@ -305,19 +314,19 @@ def generate_analysis(df, segment):
         # Generate dummy data for demonstration if connection fails
         try:
             # Extract top products
-            top_products = df.groupby("PRODUCT_NAME").agg({
-                "REVENUE": "sum", 
-                "UNITS_SOLD": "sum", 
-                "ESTIMATED_PROFIT": "sum"
-            }).sort_values("REVENUE", ascending=False).head(5)
+            top_products = df.groupby("product_name").agg({
+                "revenue": "sum", 
+                "units_sold": "sum", 
+                "estimated_profit": "sum"
+            }).sort_values("revenue", ascending=False).head(5)
             
             analysis_result["data_tables"]["top_products"] = top_products.reset_index()
             
             # Extract channel data
-            channels = df.groupby("SALES_CHANNEL").agg({
-                "REVENUE": "sum", 
-                "UNITS_SOLD": "sum"
-            }).sort_values("REVENUE", ascending=False)
+            channels = df.groupby("sales_channel").agg({
+                "revenue": "sum", 
+                "units_sold": "sum"
+            }).sort_values("revenue", ascending=False)
             
             analysis_result["data_tables"]["channels"] = channels.reset_index()
             
@@ -357,6 +366,165 @@ def generate_analysis(df, segment):
         st.error(f"Error generating analysis: {str(e)}")
         return None
 
+# Function to create multiple visualizations
+def create_sales_visualizations(df):
+    visualizations = {}
+    
+    # Set the style for all visualizations
+    sns.set(style="darkgrid")
+    plt.rcParams.update({'font.size': 12})
+    
+    # Create a function to format currency on axes
+    def currency_formatter(x, pos):
+        return f"${x:,.2f}"
+
+    # Create a function to format percentage on axes
+    def percentage_formatter(x, pos):
+        return f"{x:.0f}%"
+
+    # 1. Product Performance Analysis
+    fig1, axes = plt.subplots(2, 2, figsize=(18, 14))
+    
+    # 1.1 Total Revenue by Product - Fix column names to lowercase
+    product_revenue = df.groupby('product_name')['revenue'].sum().sort_values(ascending=False)
+    sns.barplot(x=product_revenue.values, y=product_revenue.index, ax=axes[0, 0], palette='viridis')
+    axes[0, 0].set_title('Total Revenue by Product', fontsize=14)
+    axes[0, 0].set_xlabel('Revenue ($)')
+    axes[0, 0].xaxis.set_major_formatter(FuncFormatter(currency_formatter))
+    for i, v in enumerate(product_revenue.values):
+        axes[0, 0].text(v + 5, i, f"${v:,.2f}", va='center')
+    
+    # 1.2 Units Sold by Product - Fix column names to lowercase
+    product_units = df.groupby('product_name')['units_sold'].sum().sort_values(ascending=False)
+    sns.barplot(x=product_units.values, y=product_units.index, ax=axes[0, 1], palette='viridis')
+    axes[0, 1].set_title('Total Units Sold by Product', fontsize=14)
+    axes[0, 1].set_xlabel('Units Sold')
+    for i, v in enumerate(product_units.values):
+        axes[0, 1].text(v + 0.5, i, f"{v:,}", va='center')
+    
+    # 1.3 Average Price by Product - Fix column names to lowercase
+    product_price = df.groupby('product_name')['price'].mean().sort_values(ascending=False)
+    sns.barplot(x=product_price.values, y=product_price.index, ax=axes[1, 0], palette='viridis')
+    axes[1, 0].set_title('Average Price by Product', fontsize=14)
+    axes[1, 0].set_xlabel('Average Price ($)')
+    axes[1, 0].xaxis.set_major_formatter(FuncFormatter(currency_formatter))
+    for i, v in enumerate(product_price.values):
+        axes[1, 0].text(v + 0.5, i, f"${v:.2f}", va='center')
+    
+    # 1.4 Total Profit by Product - Fix column names to lowercase
+    product_profit = df.groupby('product_name')['estimated_profit'].sum().sort_values(ascending=False)
+    sns.barplot(x=product_profit.values, y=product_profit.index, ax=axes[1, 1], palette='viridis')
+    axes[1, 1].set_title('Total Profit by Product', fontsize=14)
+    axes[1, 1].set_xlabel('Profit ($)')
+    axes[1, 1].xaxis.set_major_formatter(FuncFormatter(currency_formatter))
+    for i, v in enumerate(product_profit.values):
+        axes[1, 1].text(v + 5, i, f"${v:,.2f}", va='center')
+    
+    plt.tight_layout()
+    visualizations['product_performance'] = fig1
+    
+    # 2. Geographic Analysis
+    fig2, axes = plt.subplots(2, 1, figsize=(14, 12))
+    
+    # 2.1 Revenue by City - Fix column names to lowercase
+    city_revenue = df.groupby('city_name')['revenue'].sum().sort_values(ascending=False)
+    sns.barplot(x=city_revenue.index, y=city_revenue.values, ax=axes[0], palette='mako')
+    axes[0].set_title('Total Revenue by City', fontsize=14)
+    axes[0].set_ylabel('Revenue ($)')
+    axes[0].set_xlabel('')
+    axes[0].yaxis.set_major_formatter(FuncFormatter(currency_formatter))
+    axes[0].tick_params(axis='x', rotation=45)
+    for i, v in enumerate(city_revenue.values):
+        axes[0].text(i, v + 10, f"${v:,.2f}", ha='center')
+    
+    # 2.2 Revenue by State - Fix column names to lowercase
+    state_revenue = df.groupby('state')['revenue'].sum().sort_values(ascending=False)
+    sns.barplot(x=state_revenue.index, y=state_revenue.values, ax=axes[1], palette='mako')
+    axes[1].set_title('Total Revenue by State', fontsize=14)
+    axes[1].set_ylabel('Revenue ($)')
+    axes[1].set_xlabel('')
+    axes[1].yaxis.set_major_formatter(FuncFormatter(currency_formatter))
+    for i, v in enumerate(state_revenue.values):
+        axes[1].text(i, v + 10, f"${v:,.2f}", ha='center')
+    
+    plt.tight_layout()
+    visualizations['geographic_analysis'] = fig2
+    
+    # 3. Profit Margin Analysis
+    fig3, axes = plt.subplots(1, 2, figsize=(18, 7))
+    
+    # 3.1 Average Margin % by Product - Fix column names to lowercase
+    product_margin = df.groupby('product_name')['estimated_margin_pct'].mean().sort_values(ascending=False)
+    sns.barplot(x=product_margin.index, y=product_margin.values, ax=axes[0], palette='rocket')
+    axes[0].set_title('Average Profit Margin by Product', fontsize=14)
+    axes[0].set_ylabel('Margin %')
+    axes[0].set_xlabel('')
+    axes[0].tick_params(axis='x', rotation=45)
+    for i, v in enumerate(product_margin.values):
+        axes[0].text(i, v + 1, f"{v:.1f}%", ha='center')
+    
+    # 3.2 Margin vs Revenue Scatterplot - Fix column names to lowercase
+    sns.scatterplot(x='revenue', y='estimated_margin_pct', data=df, 
+                    hue='product_name', size='units_sold', sizes=(50, 200),
+                    ax=axes[1])
+    axes[1].set_title('Margin vs Revenue by Transaction', fontsize=14)
+    axes[1].set_xlabel('Revenue ($)')
+    axes[1].set_ylabel('Margin %')
+    axes[1].xaxis.set_major_formatter(FuncFormatter(currency_formatter))
+    
+    plt.tight_layout()
+    visualizations['margin_analysis'] = fig3
+    
+    # 4. Time Series Analysis
+    # Convert date to datetime if it's not already
+    if df['date'].dtype != 'datetime64[ns]':
+        df['date'] = pd.to_datetime(df['date'])
+    
+    fig4, axes = plt.subplots(2, 1, figsize=(14, 12))
+    
+    # 4.1 Revenue Over Time by Product - Fix column names to lowercase
+    time_product = df.groupby(['date', 'product_name'])['revenue'].sum().reset_index()
+    sns.lineplot(x='date', y='revenue', hue='product_name', data=time_product, 
+                marker='o', ax=axes[0])
+    axes[0].set_title('Revenue Over Time by Product', fontsize=14)
+    axes[0].set_ylabel('Revenue ($)')
+    axes[0].set_xlabel('')
+    axes[0].yaxis.set_major_formatter(FuncFormatter(currency_formatter))
+    axes[0].legend(title='Product')
+    
+    # 4.2 Units Sold Over Time - Fix column names to lowercase
+    time_units = df.groupby('date')['units_sold'].sum().reset_index()
+    sns.lineplot(x='date', y='units_sold', data=time_units, color='purple', 
+                marker='o', linewidth=2, ax=axes[1])
+    axes[1].set_title('Total Units Sold Over Time', fontsize=14)
+    axes[1].set_ylabel('Units Sold')
+    axes[1].set_xlabel('Date')
+    
+    plt.tight_layout()
+    visualizations['time_series'] = fig4
+    
+    # 5. Price Distribution and Product Mix
+    fig5, axes = plt.subplots(1, 2, figsize=(18, 7))
+    
+    # 5.1 Price Distribution - Fix column names to lowercase
+    sns.histplot(df['price'], bins=10, kde=True, ax=axes[0], color='teal')
+    axes[0].set_title('Price Distribution', fontsize=14)
+    axes[0].set_xlabel('Price ($)')
+    axes[0].set_ylabel('Frequency')
+    axes[0].xaxis.set_major_formatter(FuncFormatter(currency_formatter))
+    
+    # 5.2 Product Mix (Revenue Share) - Fix column names to lowercase
+    product_share = df.groupby('product_name')['revenue'].sum()
+    explode = [0.1] * len(product_share)  # Explode all slices slightly
+    axes[1].pie(product_share, labels=product_share.index, autopct='%1.1f%%',
+                startangle=90, shadow=True, explode=explode)
+    axes[1].set_title('Revenue Share by Product', fontsize=14)
+    axes[1].axis('equal')  # Equal aspect ratio ensures that pie is drawn as a circle
+    
+    plt.tight_layout()
+    visualizations['price_product_mix'] = fig5
+    
+    return visualizations
 
 # Always show upload container
 upload_container = st.container()
@@ -425,11 +593,17 @@ if 'sales_data' in st.session_state and st.session_state['sales_data'] is not No
                         st.warning(f"Note: Could not connect to Snowflake: {str(e)}")
                         st.info("Proceeding with local data analysis only.")
                     
-                    # Show success message and refresh to update UI
-                    st.info("You can now click 'Generate Analysis' below.")
-                else:
-                    # Local save failed
-                    st.error(f"Failed to save data: {local_result['message']}")
+                    # Show countdown and generate visualizations automatically
+                    countdown_placeholder = st.empty()
+                    for i in range(5, 0, -1):
+                        countdown_placeholder.info(f"Generating visualizations in {i} seconds...")
+                        time.sleep(1)
+                    countdown_placeholder.empty()
+                    
+                    # Flag to track visualization status
+                    st.session_state['auto_generate_viz'] = True
+                    
+                    
     else:
         st.success("✅ Your data is ready for analysis!")
 else:
@@ -438,6 +612,19 @@ else:
     else:
         st.warning("Please load data before proceeding")
 
+# Automatic visualization generation after data save
+if 'auto_generate_viz' in st.session_state and st.session_state['auto_generate_viz'] and 'sales_data' in st.session_state and st.session_state['sales_data'] is not None:
+    with st.spinner("Generating visualizations..."):
+        # Create all visualizations
+        visualizations = create_sales_visualizations(st.session_state['sales_data'])
+        st.session_state['visualizations'] = visualizations
+        st.session_state['auto_generate_viz'] = False  # Reset flag to prevent regeneration
+    
+    # Display success message
+    st.success("✅ Visualizations generated successfully!")
+    
+    # Add spacer
+    st.markdown("---")
 
 # Display "Generate Analysis" button in the main area once data is uploaded
 if 'snowflake_uploaded' in st.session_state and st.session_state['snowflake_uploaded']:
@@ -601,3 +788,266 @@ if 'analysis_result' in st.session_state and st.session_state['analysis_result']
         
         plt.tight_layout()
         st.pyplot(fig)
+
+# Display visualizations if available
+if 'sales_data' in st.session_state and st.session_state['sales_data'] is not None:
+    # Use cached visualizations if available, otherwise generate them
+    if 'visualizations' in st.session_state:
+        visualizations = st.session_state['visualizations']
+    else:
+        visualizations = create_sales_visualizations(st.session_state['sales_data'])
+        st.session_state['visualizations'] = visualizations
+
+    # Display visualizations in Streamlit
+    st.header("📊 Pharmaceutical Sales Analytics")
+
+    # Product Performance
+    st.subheader("Product Performance Analysis")
+    st.pyplot(visualizations['product_performance'])
+
+    # Geographic Analysis
+    st.subheader("Geographic Sales Analysis")
+    st.pyplot(visualizations['geographic_analysis'])
+
+    # Margin Analysis
+    st.subheader("Profit Margin Analysis")
+    st.pyplot(visualizations['margin_analysis'])
+
+    # Time Series Analysis
+    st.subheader("Sales Trends Over Time")
+    st.pyplot(visualizations['time_series'])
+
+    # Price Distribution and Product Mix
+    st.subheader("Price Distribution & Product Mix")
+    st.pyplot(visualizations['price_product_mix'])
+
+    # Additional insights - summary metrics in columns
+    st.subheader("Summary Metrics")
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        st.metric("Total Revenue", f"${st.session_state['sales_data']['revenue'].sum():,.2f}")
+
+    with col2:
+        st.metric("Total Units Sold", f"{st.session_state['sales_data']['units_sold'].sum():,}")
+
+    with col3:
+        st.metric("Avg. Profit Margin", f"{st.session_state['sales_data']['estimated_margin_pct'].mean():.1f}%")
+
+    with col4:
+        st.metric("Total Profit", f"${st.session_state['sales_data']['estimated_profit'].sum():,.2f}")
+
+# Add AI-powered sales strategy recommendations section
+st.markdown("---")
+st.subheader("📚 AI-Powered Sales Strategy Recommendations")
+
+def retrieve_sales_strategies(query, top_k=3):
+    """Retrieve relevant sales strategies from Pinecone vector database"""
+    try:
+        # Import OpenAI at the beginning
+        import openai
+        import os
+        
+        # Initialize Pinecone - use Pinecone() constructor for the new SDK
+        try:
+            from pinecone import Pinecone
+            pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
+            index = pc.Index("healthcare-product-analytics")
+        except Exception as init_error:
+            # Fallback to older method if needed
+            import pinecone
+            pinecone.init(api_key=os.getenv("PINECONE_API_KEY"), environment=os.getenv("PINECONE_ENV", "us-east-1"))
+            index = pinecone.Index("healthcare-product-analytics")
+            
+        # Generate embedding using OpenAI instead of SentenceTransformer
+        response = openai.embeddings.create(
+            model="text-embedding-ada-002",
+            input=query
+        )
+        query_embedding = response.data[0].embedding  # Extract the embedding vector
+        
+        # Query the index with specific namespace for Kotler's book
+        try:
+            results = index.query(
+                vector=query_embedding,
+                top_k=top_k,
+                include_metadata=True,
+                namespace="book-kotler"  # Target specifically the Kotler book
+            )
+            
+            # Extract the text from the results
+            strategies = []
+            for match in results.matches:
+                if hasattr(match, 'metadata') and 'text' in match.metadata:
+                    strategies.append({
+                        "text": match.metadata['text'],
+                        "score": match.score,
+                        "source": match.metadata.get('source', match.metadata.get('filename', 'Marketing Management - Kotler'))
+                    })
+            
+            return strategies
+            
+        except Exception as query_error:
+            print(f"Pinecone query error: {str(query_error)}")
+            # Return fallback strategy
+            return [{
+                "text": "Focus on value-based selling approaches that emphasize outcomes and benefits rather than features.",
+                "score": 1.0,
+                "source": "Marketing Management - Kotler (Fallback)"
+            }]
+            
+    except Exception as e:
+        print(f"Error retrieving sales strategies: {str(e)}")
+        # Return fallback strategy without displaying error to user
+        return [{
+            "text": "Focus on value-based selling approaches that emphasize outcomes and benefits rather than features.",
+            "score": 1.0,
+            "source": "Marketing Management - Kotler (Fallback)"
+        }]
+
+def generate_strategy_queries(df, segment_name):
+    """Analyze metrics and generate appropriate queries for strategy retrieval"""
+    queries = []
+    
+    # Calculate key metrics
+    total_revenue = df['revenue'].sum()
+    avg_margin = df['estimated_margin_pct'].mean()
+    
+    # Get top and bottom products
+    top_product = df.groupby('product_name')['revenue'].sum().idxmax()
+    bottom_product = df.groupby('product_name')['revenue'].sum().idxmin()
+    
+    # Get top sales channel if available
+    top_channel = None
+    if 'sales_channel' in df.columns:
+        top_channel = df.groupby('sales_channel')['revenue'].sum().idxmax()
+    
+    # Generate queries based on metrics and segment
+    queries.append(f"sales growth strategies for {segment_name} pharmaceutical products")
+    
+    if avg_margin < 55:
+        queries.append(f"improving profit margins in {segment_name} pharmaceutical sales")
+    else:
+        queries.append(f"maintaining high profit margins while growing sales volume in healthcare")
+    
+    if top_product:
+        queries.append(f"leveraging top performing products to increase overall sales in pharmaceuticals")
+    
+    if bottom_product:
+        queries.append(f"improving sales for underperforming pharmaceutical products")
+    
+    if top_channel:
+        queries.append(f"optimizing pharmaceutical sales strategy for {top_channel} channel")
+    
+    return queries
+
+def generate_sales_recommendations(df, retrieved_strategies, segment_name):
+    """Generate sales recommendations based on metrics and retrieved strategies"""
+    import openai
+    
+    # Prepare the metrics summary
+    total_revenue = df['revenue'].sum()
+    total_units = df['units_sold'].sum()
+    avg_margin = df['estimated_margin_pct'].mean()
+    total_profit = df['estimated_profit'].sum()
+    
+    # Get top products and their metrics
+    top_products = df.groupby('product_name')['revenue'].sum().sort_values(ascending=False).head(3)
+    top_products_str = ", ".join([f"{p}" for p in top_products.index])
+    
+    # Prepare retrieved strategies text
+    strategies_text = ""
+    for i, strategy in enumerate(retrieved_strategies):
+        strategies_text += f"Strategy {i+1}: {strategy['text']}\n\n"
+    
+    # Create prompt for OpenAI
+    prompt = f"""
+    You are a pharmaceutical sales strategy expert focusing on the {segment_name} segment. Based on the following sales metrics 
+    and retrieved strategy information from our sales strategy book, provide specific, actionable recommendations to 
+    increase sales and profitability.
+    
+    SALES METRICS:
+    - Total Revenue: ${total_revenue:.2f}
+    - Total Units Sold: {total_units}
+    - Average Profit Margin: {avg_margin:.1f}%
+    - Total Profit: ${total_profit:.2f}
+    - Top Products: {top_products_str}
+    
+    RETRIEVED STRATEGY INFORMATION FROM SALES BOOK:
+    {strategies_text}
+    
+    Please provide 5 specific, actionable recommendations to improve sales performance in the {segment_name} segment.
+    Format your response with a brief introduction paragraph, followed by 5 numbered recommendations with clear action steps,
+    and a concluding paragraph. Reference the sales strategy book information where relevant.
+    """
+    
+    try:
+        # Get completion from OpenAI
+        response = openai.chat.completions.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": f"You are an experienced pharmaceutical sales strategy consultant specializing in the {segment_name} market."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7
+        )
+        
+        recommendations = response.choices[0].message.content
+        return recommendations
+    
+    except Exception as e:
+        st.error(f"Error generating recommendations: {str(e)}")
+        return "Could not generate recommendations due to an error. Please try again."
+
+# Add button to generate recommendations after metrics section
+if 'sales_data' in st.session_state and st.session_state['sales_data'] is not None and selected_segment:
+    if st.button("Generate Strategic Recommendations", key="generate_recommendations"):
+        with st.spinner("Analyzing your sales data and retrieving relevant strategies from our knowledge base..."):
+            # Generate queries based on the metrics
+            queries = generate_strategy_queries(st.session_state['sales_data'], selected_segment)
+            
+            # Retrieve strategies for each query (limit to keep things manageable)
+            all_strategies = []
+            for query in queries[:3]:  # Limit to first 3 queries to avoid too many API calls
+                strategies = retrieve_sales_strategies(query, top_k=2)
+                all_strategies.extend(strategies)
+            
+            # Remove duplicates
+            unique_strategies = []
+            strategy_texts = set()
+            for strategy in all_strategies:
+                if strategy['text'] not in strategy_texts:
+                    unique_strategies.append(strategy)
+                    strategy_texts.add(strategy['text'])
+            
+            # If no strategies found, add a fallback
+            if not unique_strategies:
+                unique_strategies.append({
+                    "text": "Focus on value-based selling approaches that emphasize the outcomes and benefits rather than just features.",
+                    "score": 1.0,
+                    "source": "Sales Strategy Best Practices"
+                })
+            
+            # Generate recommendations
+            recommendations = generate_sales_recommendations(
+                st.session_state['sales_data'], 
+                unique_strategies, 
+                selected_segment
+            )
+            
+            # Store in session state
+            st.session_state['sales_recommendations'] = recommendations
+            st.session_state['retrieved_strategies'] = unique_strategies
+
+# Display recommendations if available
+if 'sales_recommendations' in st.session_state and st.session_state['sales_recommendations']:
+    st.markdown(st.session_state['sales_recommendations'])
+    
+    # Show sources in an expander
+    if 'retrieved_strategies' in st.session_state and st.session_state['retrieved_strategies']:
+        with st.expander("View Source Strategies from Sales Book"):
+            for i, strategy in enumerate(st.session_state['retrieved_strategies']):
+                st.markdown(f"**Strategy {i+1}** (Relevance: {strategy['score']:.2f})")
+                st.markdown(f"> {strategy['text']}")
+                st.markdown(f"*Source: {strategy['source']}*")
+                st.markdown("---")
