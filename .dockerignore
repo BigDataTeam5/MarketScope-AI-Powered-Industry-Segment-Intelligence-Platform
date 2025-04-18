@@ -13,15 +13,14 @@ htmlcov/
 *.mypy_cache/
 .cache/
 
-# Frontend-related (excluded for backend build)
-
-streamlit_app/
-*streamlit*.py
-**/node_modules/
-*.html
-*.css
-*.jsx
-*.tsx
+# COMMENTED OUT Frontend-related exclusions
+# streamlit_app/
+# *streamlit*.py
+# **/node_modules/
+# *.html
+# *.css
+# *.jsx
+# *.tsx
 
 # IDE / System files
 .idea/
@@ -54,6 +53,7 @@ LICENSE
 logs/
 
 # Keep essential app files
+!frontend/
 !Backend/
 !chroma_db/
 !uploads/
