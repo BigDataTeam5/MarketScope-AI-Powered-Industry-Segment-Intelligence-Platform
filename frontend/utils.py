@@ -23,16 +23,16 @@ from config.config import Config
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("frontend_utils")
 
-# Use the MCP server as the API endpoint - unified server is primary
-API_URL = f"http://localhost:{Config.MCP_PORT}"
+# Use the external IP address for API endpoint - unified server is primary
+API_URL = f"http://34.42.74.104:{Config.MCP_PORT}"
 
-# Individual MCP server endpoints for direct communication
+# Individual MCP server endpoints for direct communication with external IP
 MCP_SERVERS = {
-    "unified": {"url": f"http://localhost:{Config.MCP_PORT}", "health": "/health"},
-    "market_analysis": {"url": "http://localhost:8001", "health": "/health"},
-    "sales_analytics": {"url": "http://localhost:8002", "health": "/health"},
-    "segment": {"url": "http://localhost:8003", "health": "/health"},
-    "snowflake": {"url": "http://localhost:8004", "health": "/health"}
+    "unified": {"url": f"http://34.42.74.104:{Config.MCP_PORT}", "health": "/health"},
+    "market_analysis": {"url": "http://34.42.74.104:8001", "health": "/health"},
+    "sales_analytics": {"url": "http://34.42.74.104:8002", "health": "/health"},
+    "segment": {"url": "http://34.42.74.104:8003", "health": "/health"},
+    "snowflake": {"url": "http://34.42.74.104:8004", "health": "/health"}
 }
 
 def get_available_segments() -> list:
@@ -115,8 +115,8 @@ def get_mcp_server_url(segment_name):
     if hasattr(Config, 'SEGMENT_CONFIG') and segment_name in Config.SEGMENT_CONFIG:
         port = Config.SEGMENT_CONFIG[segment_name].get('port', default_port)
     
-    # Map segment names to server URLs
-    return f"http://localhost:{port}"
+    # Map segment names to server URLs - use external IP
+    return f"http://34.42.74.104:{port}"
 
 def extract_response_text(response_data: Any) -> str:
     """Extract the response text from various response formats"""
@@ -320,7 +320,7 @@ def create_visualization_from_mcp(segment_name: str, visualization_type: str, ta
         # Use the segment server port if found, otherwise use default segment port
         if segment_port and segment_port != 8003:
             # Use segment-specific port if available
-            vis_server_url = f"http://localhost:{segment_port}/mcp"
+            vis_server_url = f"http://34.42.74.104:{segment_port}/mcp"
         else:
             # Use main segment server or unified server as fallback
             vis_server_url = f"{segment_url}/mcp"
