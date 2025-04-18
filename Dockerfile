@@ -21,11 +21,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 ENV PYTHONPATH=/app
 
-# Copy requirements.txt for pip installation (much faster than Poetry for Docker builds)
+# Copy requirements.txt for pip installation
 COPY requirements.txt ./
-COPY frontend/requirements.txt ./frontend-requirements.txt
 
-# Install dependencies using pip (faster and more reliable in Docker)
+# Create frontend requirements if it doesn't exist
+RUN echo "# Frontend requirements" > frontend-requirements.txt
+RUN echo "streamlit" >> frontend-requirements.txt
+RUN echo "requests" >> frontend-requirements.txt
+RUN echo "python-dotenv" >> frontend-requirements.txt
+RUN echo "openai" >> frontend-requirements.txt
+RUN echo "pandas" >> frontend-requirements.txt
+RUN echo "numpy" >> frontend-requirements.txt
+RUN echo "scikit-learn" >> frontend-requirements.txt
+RUN echo "pinecone" >> frontend-requirements.txt
+RUN echo "boto3" >> frontend-requirements.txt
+RUN echo "litellm" >> frontend-requirements.txt
+
+# Install dependencies using pip
 RUN pip install --no-cache-dir -r requirements.txt
 RUN pip install --no-cache-dir -r frontend-requirements.txt
 
