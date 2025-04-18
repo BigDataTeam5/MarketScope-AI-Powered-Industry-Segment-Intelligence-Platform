@@ -23,9 +23,11 @@ ENV PYTHONPATH=/app
 
 # Copy requirements.txt for pip installation (much faster than Poetry for Docker builds)
 COPY requirements.txt ./
+COPY frontend/requirements.txt ./frontend-requirements.txt
 
 # Install dependencies using pip (faster and more reliable in Docker)
 RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r frontend-requirements.txt
 
 # Copy all project code
 COPY . .
@@ -37,7 +39,15 @@ RUN find /app -name "*.py" -exec dos2unix {} \;
 RUN python -m py_compile $(find /app -name "*.py")
 
 # Expose backend service ports (MCP + optional APIs)
-EXPOSE 8000 8001 8010 8011 8012 8013 8014
+EXPOSE 8000 8001 8010 8011 8012 8013 8014 8501
 
-# Start the unified MCP server
-CMD ["python", "mcp_servers/run_all_servers.py"]
+# Create a script to run both services
+RUN echo '#!/bin/bash\n\
+python mcp_servers/run_all_servers.py &\n\
+cd frontend && streamlit run app.py --server.port=8501 --server.address=0.0.0.0\n\
+' > /app/start_services.sh
+
+RUN chmod +x /app/start_services.sh
+
+# Start both services
+CMD ["/app/start_services.sh"]
