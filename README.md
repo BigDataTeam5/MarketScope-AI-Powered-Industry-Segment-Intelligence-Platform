@@ -3,7 +3,7 @@
 ## 👥 Team Members
 - **Yash Khavnekar** – Data Collection, Web Scraping, Sentiment Analysis (MCP)
 - **Shushil Girish** – Agent Integration, Backend + ETL (LangGraph, FastAPI, Airflow)
-- **Riya Mate** – Frontend, Documentation, Codelabs
+- **Riya Mate** – Frontend, Marketing Automation,Documentation, Codelabs
 
 ---
 
