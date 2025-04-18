@@ -9,7 +9,7 @@
 
 ## 📌 Project Overview
 
-**MarketScope** is a scalable AI-powered market intelligence platform designed to democratize access to industry insights. It integrates **structured data** from Snowflake Marketplace with **real-time unstructured data** like product reviews and pricing from leading retailers (Amazon, Target, Walmart). Informed by foundational marketing literature (e.g., *Philip Kotler’s Marketing Management*), the platform delivers pricing analysis, sentiment breakdowns, and market sizing (TAM/SAM/SOM) to help startups, SMBs, and analysts explore opportunities without costly reports or consultants.
+**MarketScope** is a scalable AI-powered market intelligence platform designed to democratize access to industry insights. It integrates **structured data** from Snowflake Marketplace with **real-time unstructured data** like product reviews and pricing from vendors. Informed by foundational marketing literature (e.g., *Philip Kotler’s Marketing Management*), the platform delivers pricing analysis, sentiment breakdowns, and market sizing (TAM/SAM/SOM) to help startups, SMBs, and analysts explore opportunities without costly reports or consultants.
 
 ---
 
@@ -133,7 +133,7 @@ MarketScope-AI-Powered-Industry-Segment-Intelligence-Platform/
 - **Frontend + Backend**: GCP Cloud Run (containerized with Docker)
 - **Pipelines**: Cloud Composer (Airflow DAG orchestration)
 - **CI/CD**: GitHub Actions for pipeline updates and app deployment
-- **Secrets & Cache**: Redis + GCP Secret Manager
+- **Secrets & Cache**:  GCP Secret Manager
 
 ---
 
@@ -155,7 +155,6 @@ MarketScope-AI-Powered-Industry-Segment-Intelligence-Platform/
 
 - Democratize access to industry research insights
 - Automate market sizing (TAM/SAM/SOM) and tier classification
-- Achieve 90%+ review sentiment classification accuracy
 - Provide book-informed strategic Q&A based on marketing theory
 
 ---
