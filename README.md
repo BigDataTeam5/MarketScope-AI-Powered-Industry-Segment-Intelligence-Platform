@@ -1,4 +1,4 @@
-# MarketScope AI: AI-Powered Industry Segment Intelligence Platform
+# MarketScope AI: Healthcare Product Analytics 
 
 MarketScope AI is an intelligent analytics platform that helps you understand and analyze different healthcare market segments using advanced AI and natural language processing.
 
