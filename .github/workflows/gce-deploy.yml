@@ -76,10 +76,58 @@ jobs:
       - name: Test SSH Connection
         run: gcloud compute ssh --zone ${{ env.GCE_INSTANCE_ZONE }} ${{ env.GCE_INSTANCE }} --quiet --command "echo 'SSH connection test successful'"
       
-      # Deploy with a simplified command format
       - name: Deploy to GCE instance
-        run: gcloud compute ssh --zone ${{ env.GCE_INSTANCE_ZONE }} ${{ env.GCE_INSTANCE }} --command "cd /opt/marketscope && echo 'Stopping any existing containers...' && sudo docker ps -q | xargs -r sudo docker stop && sudo docker-compose down && echo 'IMAGE=gcr.io/${{ secrets.GCP_PROJECT_ID }}/marketscope:${{ github.sha }}' > .env && sudo docker pull gcr.io/${{ secrets.GCP_PROJECT_ID }}/marketscope:${{ github.sha }} && sudo docker-compose up -d && echo Deployment completed at \$(date)"
-      
+        run: |
+          gcloud compute ssh --zone ${{ env.GCE_INSTANCE_ZONE }} ${{ env.GCE_INSTANCE }} --command "
+            # Set proper permissions so we can write to the directory
+            sudo chown \$(whoami):\$(whoami) /opt/marketscope
+            
+            # Navigate to the directory
+            cd /opt/marketscope
+            
+            echo 'Stopping any existing containers...'
+            sudo docker ps -q | xargs -r sudo docker stop
+            sudo docker-compose down || echo 'No existing docker-compose to bring down'
+            
+            # Create .env file with the image reference
+            echo 'IMAGE=gcr.io/${{ secrets.GCP_PROJECT_ID }}/marketscope:${{ github.sha }}' > .env
+            
+            # Pull the Docker image
+            sudo docker pull gcr.io/${{ secrets.GCP_PROJECT_ID }}/marketscope:${{ github.sha }}
+            
+            # Create docker-compose.yml file
+            cat > docker-compose.yml << 'EOL'
+            version: '3.8'
+            services:
+              mcp-server:
+                image: \${IMAGE}
+                container_name: marketscope
+                restart: always
+                env_file:
+                  - ./.env
+                ports:
+                  - \"8000:8000\"
+                  - \"8001:8001\"
+                  - \"8002:8002\"
+                  - \"8003:8003\"
+                  - \"8004:8004\"
+                  - \"8005:8005\"
+                  - \"8006:8006\"
+                  - \"8007:8007\"
+                  - \"8008:8008\"
+                  - \"8009:8009\"
+                  - \"8010:8010\"
+                  - \"8011:8011\"
+                  - \"8012:8012\"
+                  - \"8013:8013\"
+                  - \"8014:8014\"
+                  - \"8015:8015\"
+            EOL
+            
+            # Run docker-compose
+            sudo docker-compose up -d
+            echo 'Deployment completed at \$(date)'
+          "
       - name: Check deployment status
         run: |
           sleep 30
