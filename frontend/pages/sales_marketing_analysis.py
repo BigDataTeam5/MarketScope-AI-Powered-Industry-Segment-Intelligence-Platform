@@ -19,6 +19,8 @@ import logging
 import numpy as np
 from matplotlib.ticker import FuncFormatter
 import time
+from sentence_transformers import SentenceTransformer
+import pinecone
 
 # Suppress warnings
 warnings.filterwarnings('ignore')
@@ -138,13 +140,13 @@ def save_csv_to_local(df, segment_name):
 
 # Function to upload data to Snowflake with proper error handling
 async def upload_to_snowflake(df, segment_name):
-    # Initialize the Snowflake MCP client - use "snowflake" service directly
+    # Initialize the Snowflake MCP client
     snowflake_mcp_client = None
     try:
         # Minimized logging
         st.info("Connecting to Snowflake MCP server...")
         
-        # Create and configure MCP client using the proper MCPClient class
+        # Create and configure MCP client
         from agents.custom_mcp_client import MCPClient
         snowflake_mcp_client = MCPClient("snowflake")
         
@@ -158,7 +160,7 @@ async def upload_to_snowflake(df, segment_name):
                     "message": "Snowflake MCP server is not available - no tools found"
                 }
             
-            # Check if the required tool exists - properly handle tools list format
+            # Check if the required tool exists
             tool_exists = False
             if isinstance(tools, list):
                 tool_exists = any(tool.get("name") == "load_csv_to_table" for tool in tools)
@@ -191,20 +193,26 @@ async def upload_to_snowflake(df, segment_name):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         table_name = f"SALES_DATA_{timestamp}"
         
-        # Use Snowflake MCP client to load data
+        # Convert segment name to a valid schema name (uppercase, replace spaces with underscores)
+        schema_name = segment_name.upper().replace(" ", "_").replace("-", "_")
+        
+        # Use Snowflake MCP client to load data with segment-based schema
         response = await snowflake_mcp_client.invoke(
             "load_csv_to_table", 
             {
                 "table_name": table_name,
                 "csv_data": csv_string,
                 "create_table": True,
-                "segment_name": segment_name
+                "segment_name": segment_name,
+                "schema": schema_name,                # Use segment as schema name
+                "database": "MARKETSCOPE",           # Default database
+                "warehouse": "COMPUTE_WH",           # Default warehouse
+                "create_schema_if_not_exists": True  # Automatically create schema if needed
             }
         )
         
-        # Properly handle different response formats
+        # Handle response
         if isinstance(response, dict):
-            # Handle dictionary response format
             if "status" in response and response["status"] == "error":
                 return {
                     "status": "error",
@@ -216,7 +224,6 @@ async def upload_to_snowflake(df, segment_name):
                     "message": response.get("content", str(response))
                 }
         elif isinstance(response, str):
-            # Handle string response format
             if "error" in response.lower():
                 return {
                     "status": "error",
@@ -228,7 +235,6 @@ async def upload_to_snowflake(df, segment_name):
                     "message": response
                 }
         else:
-            # Handle any other response type
             return {
                 "status": "success",
                 "message": str(response)
@@ -239,7 +245,6 @@ async def upload_to_snowflake(df, segment_name):
             "message": f"Snowflake upload error: {str(e)}"
         }
     finally:
-        # Ensure client is properly closed to avoid unclosed session warnings
         if snowflake_mcp_client:
             try:
                 await snowflake_mcp_client.close()
@@ -598,11 +603,7 @@ if 'sales_data' in st.session_state and st.session_state['sales_data'] is not No
                     # Flag to track visualization status
                     st.session_state['auto_generate_viz'] = True
                     
-                    # Refresh to update UI
-                    st.experimental_rerun()
-                else:
-                    # Local save failed
-                    st.error(f"Failed to save data: {local_result['message']}")
+                    
     else:
         st.success("✅ Your data is ready for analysis!")
 else:
@@ -835,3 +836,218 @@ if 'sales_data' in st.session_state and st.session_state['sales_data'] is not No
 
     with col4:
         st.metric("Total Profit", f"${st.session_state['sales_data']['estimated_profit'].sum():,.2f}")
+
+# Add AI-powered sales strategy recommendations section
+st.markdown("---")
+st.subheader("📚 AI-Powered Sales Strategy Recommendations")
+
+def retrieve_sales_strategies(query, top_k=3):
+    """Retrieve relevant sales strategies from Pinecone vector database"""
+    try:
+        # Import OpenAI at the beginning
+        import openai
+        import os
+        
+        # Initialize Pinecone - use Pinecone() constructor for the new SDK
+        try:
+            from pinecone import Pinecone
+            pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
+            index = pc.Index("healthcare-product-analytics")
+        except Exception as init_error:
+            # Fallback to older method if needed
+            import pinecone
+            pinecone.init(api_key=os.getenv("PINECONE_API_KEY"), environment=os.getenv("PINECONE_ENV", "us-east-1"))
+            index = pinecone.Index("healthcare-product-analytics")
+            
+        # Generate embedding using OpenAI instead of SentenceTransformer
+        response = openai.embeddings.create(
+            model="text-embedding-ada-002",
+            input=query
+        )
+        query_embedding = response.data[0].embedding  # Extract the embedding vector
+        
+        # Query the index with specific namespace for Kotler's book
+        try:
+            results = index.query(
+                vector=query_embedding,
+                top_k=top_k,
+                include_metadata=True,
+                namespace="book-kotler"  # Target specifically the Kotler book
+            )
+            
+            # Extract the text from the results
+            strategies = []
+            for match in results.matches:
+                if hasattr(match, 'metadata') and 'text' in match.metadata:
+                    strategies.append({
+                        "text": match.metadata['text'],
+                        "score": match.score,
+                        "source": match.metadata.get('source', match.metadata.get('filename', 'Marketing Management - Kotler'))
+                    })
+            
+            return strategies
+            
+        except Exception as query_error:
+            print(f"Pinecone query error: {str(query_error)}")
+            # Return fallback strategy
+            return [{
+                "text": "Focus on value-based selling approaches that emphasize outcomes and benefits rather than features.",
+                "score": 1.0,
+                "source": "Marketing Management - Kotler (Fallback)"
+            }]
+            
+    except Exception as e:
+        print(f"Error retrieving sales strategies: {str(e)}")
+        # Return fallback strategy without displaying error to user
+        return [{
+            "text": "Focus on value-based selling approaches that emphasize outcomes and benefits rather than features.",
+            "score": 1.0,
+            "source": "Marketing Management - Kotler (Fallback)"
+        }]
+
+def generate_strategy_queries(df, segment_name):
+    """Analyze metrics and generate appropriate queries for strategy retrieval"""
+    queries = []
+    
+    # Calculate key metrics
+    total_revenue = df['revenue'].sum()
+    avg_margin = df['estimated_margin_pct'].mean()
+    
+    # Get top and bottom products
+    top_product = df.groupby('product_name')['revenue'].sum().idxmax()
+    bottom_product = df.groupby('product_name')['revenue'].sum().idxmin()
+    
+    # Get top sales channel if available
+    top_channel = None
+    if 'sales_channel' in df.columns:
+        top_channel = df.groupby('sales_channel')['revenue'].sum().idxmax()
+    
+    # Generate queries based on metrics and segment
+    queries.append(f"sales growth strategies for {segment_name} pharmaceutical products")
+    
+    if avg_margin < 55:
+        queries.append(f"improving profit margins in {segment_name} pharmaceutical sales")
+    else:
+        queries.append(f"maintaining high profit margins while growing sales volume in healthcare")
+    
+    if top_product:
+        queries.append(f"leveraging top performing products to increase overall sales in pharmaceuticals")
+    
+    if bottom_product:
+        queries.append(f"improving sales for underperforming pharmaceutical products")
+    
+    if top_channel:
+        queries.append(f"optimizing pharmaceutical sales strategy for {top_channel} channel")
+    
+    return queries
+
+def generate_sales_recommendations(df, retrieved_strategies, segment_name):
+    """Generate sales recommendations based on metrics and retrieved strategies"""
+    import openai
+    
+    # Prepare the metrics summary
+    total_revenue = df['revenue'].sum()
+    total_units = df['units_sold'].sum()
+    avg_margin = df['estimated_margin_pct'].mean()
+    total_profit = df['estimated_profit'].sum()
+    
+    # Get top products and their metrics
+    top_products = df.groupby('product_name')['revenue'].sum().sort_values(ascending=False).head(3)
+    top_products_str = ", ".join([f"{p}" for p in top_products.index])
+    
+    # Prepare retrieved strategies text
+    strategies_text = ""
+    for i, strategy in enumerate(retrieved_strategies):
+        strategies_text += f"Strategy {i+1}: {strategy['text']}\n\n"
+    
+    # Create prompt for OpenAI
+    prompt = f"""
+    You are a pharmaceutical sales strategy expert focusing on the {segment_name} segment. Based on the following sales metrics 
+    and retrieved strategy information from our sales strategy book, provide specific, actionable recommendations to 
+    increase sales and profitability.
+    
+    SALES METRICS:
+    - Total Revenue: ${total_revenue:.2f}
+    - Total Units Sold: {total_units}
+    - Average Profit Margin: {avg_margin:.1f}%
+    - Total Profit: ${total_profit:.2f}
+    - Top Products: {top_products_str}
+    
+    RETRIEVED STRATEGY INFORMATION FROM SALES BOOK:
+    {strategies_text}
+    
+    Please provide 5 specific, actionable recommendations to improve sales performance in the {segment_name} segment.
+    Format your response with a brief introduction paragraph, followed by 5 numbered recommendations with clear action steps,
+    and a concluding paragraph. Reference the sales strategy book information where relevant.
+    """
+    
+    try:
+        # Get completion from OpenAI
+        response = openai.chat.completions.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": f"You are an experienced pharmaceutical sales strategy consultant specializing in the {segment_name} market."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7
+        )
+        
+        recommendations = response.choices[0].message.content
+        return recommendations
+    
+    except Exception as e:
+        st.error(f"Error generating recommendations: {str(e)}")
+        return "Could not generate recommendations due to an error. Please try again."
+
+# Add button to generate recommendations after metrics section
+if 'sales_data' in st.session_state and st.session_state['sales_data'] is not None and selected_segment:
+    if st.button("Generate Strategic Recommendations", key="generate_recommendations"):
+        with st.spinner("Analyzing your sales data and retrieving relevant strategies from our knowledge base..."):
+            # Generate queries based on the metrics
+            queries = generate_strategy_queries(st.session_state['sales_data'], selected_segment)
+            
+            # Retrieve strategies for each query (limit to keep things manageable)
+            all_strategies = []
+            for query in queries[:3]:  # Limit to first 3 queries to avoid too many API calls
+                strategies = retrieve_sales_strategies(query, top_k=2)
+                all_strategies.extend(strategies)
+            
+            # Remove duplicates
+            unique_strategies = []
+            strategy_texts = set()
+            for strategy in all_strategies:
+                if strategy['text'] not in strategy_texts:
+                    unique_strategies.append(strategy)
+                    strategy_texts.add(strategy['text'])
+            
+            # If no strategies found, add a fallback
+            if not unique_strategies:
+                unique_strategies.append({
+                    "text": "Focus on value-based selling approaches that emphasize the outcomes and benefits rather than just features.",
+                    "score": 1.0,
+                    "source": "Sales Strategy Best Practices"
+                })
+            
+            # Generate recommendations
+            recommendations = generate_sales_recommendations(
+                st.session_state['sales_data'], 
+                unique_strategies, 
+                selected_segment
+            )
+            
+            # Store in session state
+            st.session_state['sales_recommendations'] = recommendations
+            st.session_state['retrieved_strategies'] = unique_strategies
+
+# Display recommendations if available
+if 'sales_recommendations' in st.session_state and st.session_state['sales_recommendations']:
+    st.markdown(st.session_state['sales_recommendations'])
+    
+    # Show sources in an expander
+    if 'retrieved_strategies' in st.session_state and st.session_state['retrieved_strategies']:
+        with st.expander("View Source Strategies from Sales Book"):
+            for i, strategy in enumerate(st.session_state['retrieved_strategies']):
+                st.markdown(f"**Strategy {i+1}** (Relevance: {strategy['score']:.2f})")
+                st.markdown(f"> {strategy['text']}")
+                st.markdown(f"*Source: {strategy['source']}*")
+                st.markdown("---")

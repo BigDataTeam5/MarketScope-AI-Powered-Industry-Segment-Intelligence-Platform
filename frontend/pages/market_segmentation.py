@@ -381,6 +381,5 @@ def show():
                 
                 except Exception as e:
                     st.error(f"Search failed: {str(e)}")
-                    st.code(traceback.format_exc())
-    
+                    
 show()
