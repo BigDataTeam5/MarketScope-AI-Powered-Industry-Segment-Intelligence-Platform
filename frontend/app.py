@@ -7,7 +7,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Add root directory to path for imports
 from frontend.utils import sidebar, get_server_status
-from agents.custom_mcp_client import SimpleMCPClient as MCPClient
+from agents.custom_mcp_client import MCPClient
 
 # Set page config to full width
 st.set_page_config(layout="wide")

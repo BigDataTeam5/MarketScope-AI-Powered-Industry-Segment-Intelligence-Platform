@@ -317,44 +317,70 @@ def show():
                     st.code(f"Exception details: {type(e).__name__}: {str(e)}")
                     st.info("Try refreshing the page or selecting a different segment.")
         
-        # Add vector search functionality
+        # Replace the Segment Data Search section with this improved version
         st.subheader("Segment Data Search")
         st.markdown("Search for specific information within segment Form 10Q reports")
-        
+
         search_query = st.text_input("Enter search query:", placeholder="market growth rate in diagnostic segment")
         search_button = st.button("Search")
-        
+
         if search_button and search_query:
-            with st.spinner("Searching and summarizing..."):
+            with st.spinner("Searching relevant documents and generating insights..."):
                 try:
-                    # Call the new endpoint
+                    # Get the server URL for the selected segment
                     segment_url = get_mcp_server_url(selected_segment)
                     
-                    # Add this right before your search request for debugging
-                    st.info(f"Using server URL: {segment_url} for segment: {selected_segment}")
-                    
+                    # Call the vector search endpoint
                     response = requests.post(
                         f"{segment_url}/direct/vector_search_and_summarize",
-                        params={"query": search_query, "top_k": 5},
-                        timeout=60
+                        params={"query": search_query, "segment": selected_segment, "top_k": 5},
+                        timeout=90  # Increased timeout for LLM processing
                     )
                     
                     if response.status_code == 200:
                         result = response.json()
+                        
                         if result.get("status") == "success":
-                            st.success("Query answered successfully!")
-                            st.write(f"**Answer:** {result['answer']}")
+                            st.success("Analysis complete!")
                             
-                            # Optionally display the chunks
-                            with st.expander("View relevant chunks"):
-                                for i, chunk in enumerate(result["chunks"]):
-                                    st.markdown(f"**Chunk {i+1}:** {chunk}")
+                            # Display the answer in a highlighted box
+                            st.markdown("### Answer")
+                            st.info(result["answer"])
+                            
+                            # Display source information
+                            st.markdown("### Sources")
+                            if "chunk_count" in result:
+                                st.caption(f"Analysis based on {result['chunk_count']} relevant document excerpts")
+                            
+                            # Display detailed chunks in an expander
+                            with st.expander("View Source Excerpts"):
+                                for i, chunk in enumerate(result.get("chunks", [])):
+                                    st.markdown(f"**Excerpt {i+1}:**")
+                                    
+                                    # Try to display source information
+                                    if i < len(result.get("sources", [])) and result["sources"][i]:
+                                        source = result["sources"][i]
+                                        source_info = []
+                                        if "company" in source:
+                                            source_info.append(f"Company: {source['company']}")
+                                        if "date" in source:
+                                            source_info.append(f"Date: {source['date']}")
+                                        if "file" in source:
+                                            source_info.append(f"File: {source['file']}")
+                                        if source_info:
+                                            st.caption(" | ".join(source_info))
+                                    
+                                    # Display chunk text in a code block for better readability
+                                    st.text_area("", chunk, height=100, key=f"chunk_{i}")
+                                    st.markdown("---")
                         else:
-                            st.warning(f"No results: {result.get('message', 'Unknown error')}")
+                            st.error(f"Search failed: {result.get('message', 'Unknown error')}")
                     else:
-                        st.error(f"Search failed with status code: {response.status_code}")
+                        st.error(f"API request failed with status code: {response.status_code}")
+                        st.code(response.text)
+                
                 except Exception as e:
                     st.error(f"Search failed: {str(e)}")
-
+                    st.code(traceback.format_exc())
     
 show()

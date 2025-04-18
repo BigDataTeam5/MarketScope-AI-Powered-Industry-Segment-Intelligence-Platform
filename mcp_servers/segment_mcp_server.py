@@ -761,28 +761,30 @@ class SegmentMCPServer:
         
         # Add the new endpoint for vector search and summarization
         @self.app.post("/direct/vector_search_and_summarize")
-        async def vector_search_and_summarize(query: str, top_k: int = 5):
-            """Perform vector search and summarize the results using LLM"""
-            logger.info(f"Performing vector search and summarization for query: {query}")
+        async def vector_search_and_summarize(query: str, segment: str = None, top_k: int = 5):
+            """Direct endpoint for vector search and LLM summarization"""
+            segment_name = segment or self.segment_name
+            logger.info(f"Vector search and summarize for segment: {segment_name}, query: {query}")
             
             try:
-                # Step 1: Perform vector search
+                # 1. Initialize Pinecone
                 pc = self.init_pinecone()
                 if not pc:
-                    return {
-                        "status": "error",
-                        "message": "Failed to initialize Pinecone connection"
-                    }
+                    raise ValueError("Failed to initialize Pinecone connection")
                 
-                index = pc.Index("healthcare-industry-reports")
-                namespace = self.segment_to_namespace(self.segment_name)
+                # 2. Determine namespace for the segment
+                namespace = self.segment_to_namespace(segment_name)
+                logger.info(f"Using namespace: {namespace} for vector search")
                 
-                # Generate embedding for the query
+                # 3. Generate embedding for query
                 from sentence_transformers import SentenceTransformer
                 model = SentenceTransformer('all-MiniLM-L6-v2')
                 query_embedding = model.encode(query).tolist()
                 
-                # Query Pinecone
+                # 4. Query Pinecone
+                index = pc.Index("healthcare-industry-reports")
+                
+                # First try with specific segment namespace
                 results = index.query(
                     vector=query_embedding,
                     top_k=top_k,
@@ -790,58 +792,116 @@ class SegmentMCPServer:
                     namespace=namespace
                 )
                 
+                # If no results, try the general namespace
                 if not results.matches:
-                    return {
-                        "status": "error",
-                        "message": "No relevant results found for the query."
-                    }
+                    logger.info(f"No results in namespace {namespace}, trying 'general'")
+                    results = index.query(
+                        vector=query_embedding,
+                        top_k=top_k,
+                        include_metadata=True,
+                        namespace="general"
+                    )
                 
-                # Step 2: Extract the top 5 chunks
+                # 5. Extract relevant chunks from results
                 chunks = []
-                for match in results.matches[:5]:
-                    if hasattr(match, 'metadata') and 'text' in match.metadata:
-                        chunks.append(match.metadata['text'])
+                chunk_sources = []
                 
-                if not chunks:
+                for i, match in enumerate(results.matches):
+                    if hasattr(match, 'metadata') and match.metadata and 'text' in match.metadata:
+                        chunks.append(match.metadata['text'])
+                        
+                        # Track source information for context
+                        source = {}
+                        if 'company' in match.metadata:
+                            source['company'] = match.metadata['company']
+                        if 'report_date' in match.metadata:
+                            source['date'] = match.metadata['report_date']
+                        if 'filename' in match.metadata:
+                            source['file'] = match.metadata['filename']
+                        
+                        chunk_sources.append(source)
+                        
+                # 6. Check if we have enough chunks or if we need to try segment analysis
+                if len(chunks) < 2:
+                    # If not enough chunks found, check if we have segment analysis/study reports
+                    segment_analysis_namespace = f"segment-analysis"
+                    logger.info(f"Limited chunks found, checking {segment_analysis_namespace}")
+                    
+                    analysis_results = index.query(
+                        vector=query_embedding,
+                        top_k=3,
+                        include_metadata=True,
+                        namespace=segment_analysis_namespace
+                    )
+                    
+                    for match in analysis_results.matches:
+                        if hasattr(match, 'metadata') and match.metadata and 'text' in match.metadata:
+                            chunks.append(f"[SEGMENT ANALYSIS]: {match.metadata['text']}")
+                            
+                            source = {
+                                "type": "Segment Analysis",
+                                "source": match.metadata.get('source', 'Segment Study Report')
+                            }
+                            chunk_sources.append(source)
+                
+                # 7. Generate answer using LLM
+                if chunks:
+                    # Prepare text to send to LLM
+                    import openai
+                    import os
+                    
+                    # Set API key
+                    openai.api_key = os.getenv("OPENAI_API_KEY")
+                    
+                    # Create a combined text for the prompt with proper spacing
+                    combined_text = ""
+                    for i, chunk in enumerate(chunks):
+                        combined_text += f"\n\nCHUNK {i+1}:\n{chunk}"
+                    
+                    # Create prompt for LLM
+                    prompt = f"""
+You are a financial analyst specializing in the {segment_name} sector. Based on the following relevant excerpts from Form 10Q reports, 
+provide a comprehensive answer to this query: "{query}"
+
+Analyze only the information contained in these excerpts:
+{combined_text}
+
+Format your answer to be:
+1. Directly responsive to the query
+2. Well-structured and professional
+3. Based solely on the provided excerpts
+4. Include specific facts and figures mentioned in the excerpts when relevant
+"""
+                    
+                    # Get completion from OpenAI
+                    response = openai.chat.completions.create(
+                        model="gpt-4",
+                        messages=[
+                            {"role": "system", "content": "You are a financial analyst specializing in market analysis."},
+                            {"role": "user", "content": prompt}
+                        ],
+                        temperature=0.3
+                    )
+                    
+                    answer = response.choices[0].message.content
+                    
+                    # Return the answer and chunks
+                    return {
+                        "status": "success",
+                        "query": query,
+                        "segment": segment_name,
+                        "answer": answer,
+                        "chunks": chunks,
+                        "sources": chunk_sources,
+                        "chunk_count": len(chunks)
+                    }
+                else:
                     return {
                         "status": "error",
-                        "message": "No text data found in the top results."
+                        "message": f"No relevant information found for query: {query} in segment: {segment_name}",
+                        "query": query,
+                        "segment": segment_name
                     }
-                
-                # Step 3: Pass the chunks to the LLM
-                import openai
-                openai.api_key = os.getenv("OPENAI_API_KEY")
-                
-                # Define the separator outside the f-string
-                separator = "\n\n"
-
-                prompt = f"""
-You are an expert in market analysis. Based on the following excerpts from Form 10Q reports, provide a concise and refined answer to the query: "{query}".
-
-Excerpts:
-{separator.join([f"Chunk {i+1}: {chunk}" for i, chunk in enumerate(chunks)])}
-
-Answer:
-"""
-                # Updated API call for OpenAI >= 1.0.0
-                response = openai.chat.completions.create(
-                    model="gpt-4",
-                    messages=[
-                        {"role": "system", "content": "You are an expert in market analysis."},
-                        {"role": "user", "content": prompt}
-                    ],
-                    temperature=0.5,
-                    max_tokens=300
-                )
-                
-                # Updated response parsing for new API format
-                answer = response.choices[0].message.content.strip()
-                return {
-                    "status": "success",
-                    "query": query,
-                    "answer": answer,
-                    "chunks": chunks
-                }
             
             except Exception as e:
                 logger.error(f"Error in vector search and summarization: {str(e)}")
