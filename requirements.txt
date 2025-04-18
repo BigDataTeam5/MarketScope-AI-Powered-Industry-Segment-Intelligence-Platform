@@ -9,11 +9,14 @@ anthropic>=0.5.0
 openai>=1.1.0
 pinecone-client>=2.2.2
 python-dotenv>=1.0.0
+langsmith>=0.0.52  # Added for langchain integration
 
 # MCP server
 mcp>=0.3.0
 aiohttp>=3.8.5
 httpx>=0.24.1
+requests>=2.31.0
+urllib3>=2.0.7
 
 # Data processing
 pandas>=2.0.3
@@ -29,6 +32,28 @@ chromadb>=0.4.17
 boto3>=1.28.40
 s3fs>=2023.6.0
 
+# Database connectors
+snowflake-connector-python>=3.0.0  # Added for Snowflake integration
+
 # Utility
 pydantic>=2.3.0
 python-multipart>=0.0.6
+
+# Development Tools
+black>=23.7.0
+isort>=5.12.0
+flake8>=6.1.0
+
+aiohttp>=3.8.5
+httpx>=0.24.1
+asyncpraw>=7.7.1  # Async Reddit API wrapper
+Pillow>=10.0.0
+
+# Documentation
+mkdocs>=1.5.2
+mkdocs-material>=9.2.0
+
+# Testing
+pytest>=7.4.0
+pytest-asyncio>=0.21.1
+pytest-cov>=4.1.0

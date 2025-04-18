@@ -470,33 +470,42 @@ def create_sales_visualizations(df):
     visualizations['margin_analysis'] = fig3
     
     # 4. Time Series Analysis
-    # Convert date to datetime if it's not already
-    if df['date'].dtype != 'datetime64[ns]':
-        df['date'] = pd.to_datetime(df['date'])
-    
-    fig4, axes = plt.subplots(2, 1, figsize=(14, 12))
-    
-    # 4.1 Revenue Over Time by Product - Fix column names to lowercase
-    time_product = df.groupby(['date', 'product_name'])['revenue'].sum().reset_index()
-    sns.lineplot(x='date', y='revenue', hue='product_name', data=time_product, 
-                marker='o', ax=axes[0])
-    axes[0].set_title('Revenue Over Time by Product', fontsize=14)
-    axes[0].set_ylabel('Revenue ($)')
-    axes[0].set_xlabel('')
-    axes[0].yaxis.set_major_formatter(FuncFormatter(currency_formatter))
-    axes[0].legend(title='Product')
-    
-    # 4.2 Units Sold Over Time - Fix column names to lowercase
-    time_units = df.groupby('date')['units_sold'].sum().reset_index()
-    sns.lineplot(x='date', y='units_sold', data=time_units, color='purple', 
-                marker='o', linewidth=2, ax=axes[1])
-    axes[1].set_title('Total Units Sold Over Time', fontsize=14)
-    axes[1].set_ylabel('Units Sold')
-    axes[1].set_xlabel('Date')
-    
-    plt.tight_layout()
-    visualizations['time_series'] = fig4
-    
+    try:
+        # Convert date to datetime if it's not already
+        if df['date'].dtype != 'datetime64[ns]':
+            df['date'] = pd.to_datetime(df['date'])
+        
+        # Create figure and axes for time series
+        fig4, axes = plt.subplots(2, 1, figsize=(14, 12))
+        
+        # 4.1 Revenue Over Time by Product
+        time_product = df.groupby(['date', 'product_name'])['revenue'].sum().reset_index()
+        sns.lineplot(x='date', y='revenue', hue='product_name', data=time_product, 
+                    marker='o', ax=axes[0])
+        axes[0].set_title('Revenue Over Time by Product', fontsize=14)
+        axes[0].set_ylabel('Revenue ($)')
+        axes[0].set_xlabel('')
+        axes[0].yaxis.set_major_formatter(FuncFormatter(currency_formatter))
+        axes[0].legend(title='Product')
+        
+        # 4.2 Units Sold Over Time
+        time_units = df.groupby('date')['units_sold'].sum().reset_index()
+        sns.lineplot(x='date', y='units_sold', data=time_units, color='purple', 
+                    marker='o', linewidth=2, ax=axes[1])
+        axes[1].set_title('Total Units Sold Over Time', fontsize=14)
+        axes[1].set_ylabel('Units Sold')
+        axes[1].set_xlabel('Date')
+        
+        plt.tight_layout()
+        visualizations['time_series'] = fig4
+    except Exception as e:
+        st.warning(f"Could not create time series visualization: {str(e)}")
+        # Create an empty figure as fallback
+        fig4 = plt.figure(figsize=(14, 12))
+        plt.text(0.5, 0.5, 'Time series visualization unavailable', 
+                ha='center', va='center')
+        visualizations['time_series'] = fig4
+
     # 5. Price Distribution and Product Mix
     fig5, axes = plt.subplots(1, 2, figsize=(18, 7))
     

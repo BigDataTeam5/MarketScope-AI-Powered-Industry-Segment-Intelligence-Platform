@@ -47,6 +47,13 @@ def run_snowflake_server():
     logger.info("Starting Snowflake MCP Server on port 8004")
     uvicorn.run(app, host="0.0.0.0", port=8004)
 
+def run_reddit_shopify_server():
+    """Start the Reddit & Shopify MCP server"""
+    from mcp_servers.reddit_shopify_mcp_server import app
+    import uvicorn
+    logger.info("Starting Reddit & Shopify MCP Server on port 8016")
+    uvicorn.run(app, host="0.0.0.0", port=8016)
+
 def run_specific_segment_server(segment_name):
     """Run a specific segment MCP server based on the provided segment name"""
     # Import the run_segment_server function explicitly
@@ -105,6 +112,7 @@ def run_unified_server():
                 {"name": "Sales Analytics", "url": "http://localhost:8002"},
                 {"name": "Legacy Segment", "url": "http://localhost:8003"},
                 {"name": "Snowflake", "url": "http://localhost:8004"},
+                {"name": "Reddit & Shopify", "url": "http://localhost:8016"},
                 {"name": "Unified", "url": f"http://localhost:{Config.MCP_PORT}"}
             ] + segment_servers
         }
@@ -147,6 +155,12 @@ def main():
     processes.append(("Snowflake", p4))
     time.sleep(2)
     
+    # Add Reddit & Shopify server
+    p_reddit = multiprocessing.Process(target=run_reddit_shopify_server)
+    p_reddit.start()
+    processes.append(("Reddit & Shopify", p_reddit))
+    time.sleep(2)
+    
     # Start all segment-specific servers
     segments = [
         "Skin Care Segment",
@@ -181,6 +195,7 @@ def main():
     logger.info("- Sales Analytics: http://localhost:8002")
     logger.info("- Legacy Segment: http://localhost:8003")
     logger.info("- Snowflake: http://localhost:8004")
+    logger.info("- Reddit & Shopify: http://localhost:8016")
     logger.info("- Unified: http://localhost:8000")
     
     # Log all segment servers
