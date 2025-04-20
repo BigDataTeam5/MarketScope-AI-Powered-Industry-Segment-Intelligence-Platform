@@ -44,7 +44,7 @@ services:
       dockerfile: ./Dockerfile
     container_name: mcp-server
     env_file:
-      - ./.env copy
+      - ./.env
     restart: always
     ports:
       - "8000:8000"  # Unified Server
