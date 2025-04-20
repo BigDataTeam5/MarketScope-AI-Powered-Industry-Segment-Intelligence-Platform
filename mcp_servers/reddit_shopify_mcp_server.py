@@ -20,7 +20,7 @@ import asyncpraw
 import uvicorn
 
 # Load environment variables
-load_dotenv()
+load_dotenv(override=True)
 
 # Configure logging with more detail
 logging.basicConfig(
@@ -55,7 +55,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:8011"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],

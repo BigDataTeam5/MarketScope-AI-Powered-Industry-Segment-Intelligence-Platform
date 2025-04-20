@@ -17,6 +17,10 @@ htmlcov/
 frontend/
 streamlit_app/
 *streamlit*.py
+
+# Excluded directories
+mcp/
+**/mcp/
 **/node_modules/
 *.html
 *.css

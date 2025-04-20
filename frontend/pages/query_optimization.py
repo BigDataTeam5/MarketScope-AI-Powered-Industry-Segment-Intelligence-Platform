@@ -252,273 +252,137 @@ def show():
     The system will search for the most relevant content and provide strategic recommendations.
     """)
     
-    # Tab selector for different query types
-    query_tab, strategy_tab = st.tabs(["📖 Search Knowledge", "🎯 Generate Strategy"])
+    st.subheader("Search Marketing Knowledge")
     
-    with query_tab:
-        st.subheader("Search Marketing Knowledge")
-        
-        # Search options
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            user_query = st.text_area(
-                "Enter your marketing question",
-                height=100,
-                placeholder="e.g., What are the key segmentation strategies for healthcare markets?",
-                key="search_query"
-            )
-        with col2:
-            use_context = st.checkbox("Use Sales Context", value=True)
-            search_button = st.button("Search Knowledge", type="primary", key="search_button")
-        
-        # Process search when button is clicked
-        if search_button and user_query:
-            with st.spinner("Searching for relevant marketing knowledge..."):
-                # Use our new specialized function that directly connects to the query_marketing_book tool
-                try:
-                    # Execute search asynchronously using the specialized marketing knowledge function
-                    result = asyncio.run(query_marketing_knowledge(
-                        question=user_query,
-                        segment=segment,
-                        top_k=5  # Get top 5 chunks for comprehensive coverage
-                    ))
-                    
-                    if result and result.get("status") == "success":
-                        st.session_state['search_result'] = result
-                        st.success("✅ Found relevant marketing knowledge!")
-                    else:
-                        st.error(f"❌ Search failed: {result.get('response', 'Unknown error')}")
-                except Exception as e:
-                    st.error(f"Error during search: {str(e)}")
-        
-        # Display search results
-        if 'search_result' in st.session_state and st.session_state['search_result']:
-            result = st.session_state['search_result']
-            response_text = result.get("response", "")
-            
-            # Extract chunks and sources
-            chunks = []
-            sources = []
-            
-            # Extract chunk citations and source links if available
-            chunk_pattern = r"Chunk ID: ([A-Za-z0-9-]+)"
-            source_pattern = r"Source: \[(.*?)\]\((.*?)\)"
-            
-            chunk_ids = re.findall(chunk_pattern, response_text)
-            sources = re.findall(source_pattern, response_text)
-            
-            # Get the referenced chunks directly from the result
-            if "chunk_ids" in result:
-                chunk_ids = result["chunk_ids"]
-            
-            # Clean up the response text - remove the chunk IDs from the main report
-            clean_response = response_text
-            if chunk_ids:
-                # Remove the chunk ID lines and any "References" section at the end
-                clean_response = re.sub(r"\n+## References\s*\n+Chunk ID: [A-Za-z0-9-]+(\n+Chunk ID: [A-Za-z0-9-]+)*", "", response_text)
-                clean_response = re.sub(r"\nSource \d+: [A-Za-z0-9_-]+", "", clean_response)
-                clean_response = re.sub(r"\nChunk ID: [A-Za-z0-9-]+", "", clean_response)
-            
-            # Format the report with professional styling
-            st.markdown("## Marketing Knowledge Report")
-            st.markdown("---")
-            st.markdown(clean_response)
-            
-            # Try to get the actual chunks content
-            chunk_contents = []
+    # Search options
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        user_query = st.text_area(
+            "Enter your marketing question",
+            height=100,
+            placeholder="e.g., What are the key segmentation strategies for healthcare markets?",
+            key="search_query"
+        )
+    with col2:
+        use_context = st.checkbox("Use Sales Context", value=True)
+        search_button = st.button("Search Knowledge", type="primary", key="search_button")
+    
+    # Process search when button is clicked
+    if search_button and user_query:
+        with st.spinner("Searching for relevant marketing knowledge..."):
+            # Use our new specialized function that directly connects to the query_marketing_book tool
             try:
-                # Get chunks from the query result if available
-                if 'last_query_result' in st.session_state and isinstance(st.session_state['last_query_result'], dict):
-                    query_result = st.session_state['last_query_result']
-                    if "chunks" in query_result:
-                        chunks = query_result.get("chunks", [])
-                        for chunk in chunks:
-                            if isinstance(chunk, dict) and "content" in chunk:
-                                chunk_contents.append({
-                                    "id": chunk.get("chunk_id", "unknown"),
-                                    "content": chunk.get("content", "No content available")
-                                })
-            except NameError:
-                # If query_result is not defined, try to fetch chunks again
-                try:
-                    # Create a direct connection to get the chunks
-                    from agents.custom_mcp_client import MCPClient
-                    market_analysis_client = MCPClient("market_analysis")
-                    for chunk_id in chunk_ids:
-                        try:
-                            chunk_content = market_analysis_client.invoke_sync(
-                                "fetch_s3_chunk",
-                                {"chunk_id": chunk_id}
-                            )
-                            if chunk_content and not isinstance(chunk_content, str):
-                                chunk_contents.append({"id": chunk_id, "content": str(chunk_content)})
-                            elif chunk_content:
-                                chunk_contents.append({"id": chunk_id, "content": chunk_content})
-                        except Exception as chunk_error:
-                            st.warning(f"Could not fetch content for chunk {chunk_id}: {str(chunk_error)}")
-                except Exception as e:
-                    st.warning(f"Could not fetch chunk contents: {str(e)}")
-            
-            # Move source information to an expandable section at the bottom
-            with st.expander("View Source Information"):
-                st.markdown("### Referenced Sources")
+                # Execute search asynchronously using the specialized marketing knowledge function
+                result = asyncio.run(query_marketing_knowledge(
+                    question=user_query,
+                    segment=segment,
+                    top_k=5  # Get top 5 chunks for comprehensive coverage
+                ))
                 
-                # Display chunks with their content if available
-                if chunk_contents:
-                    for i, chunk_data in enumerate(chunk_contents):
-                        st.markdown(f"**Source {i+1}:** {chunk_data['id']}")
-                        st.text_area(
-                            f"Content from {chunk_data['id']}", 
-                            value=chunk_data['content'],
-                            height=200,
-                            disabled=True,
-                            key=f"source_content_{i}"
-                        )
-                        st.markdown("---")  # Add a separator between sources
-                elif chunk_ids:
-                    for i, chunk_id in enumerate(chunk_ids):
-                        st.markdown(f"**Source {i+1}:** {chunk_id}")
+                if result and result.get("status") == "success":
+                    st.session_state['search_result'] = result
+                    st.success("✅ Found relevant marketing knowledge!")
                 else:
-                    st.markdown("No specific sources referenced.")
-                    
-                if sources:
-                    st.markdown("### Related Materials")
-                    for title, url in sources:
-                        st.markdown(f"- [{title}]({url})")
+                    st.error(f"❌ Search failed: {result.get('response', 'Unknown error')}")
+            except Exception as e:
+                st.error(f"Error during search: {str(e)}")
     
-    with strategy_tab:
-        st.subheader(f"Generate Strategy for {segment}")
+    # Display search results
+    if 'search_result' in st.session_state and st.session_state['search_result']:
+        result = st.session_state['search_result']
+        response_text = result.get("response", "")
         
-        col1, col2, col3 = st.columns([3, 1, 1])
-        with col1:
-            product_type = st.text_input(
-                "Product Type", 
-                placeholder="e.g., Wearable glucose monitor",
-                key="product_type"
-            )
-        with col2:
-            competitive_position = st.selectbox(
-                "Competitive Position",
-                options=["leader", "challenger", "follower", "nicher"],
-                index=1,
-                key="competitive_position"
-            )
-        with col3:
-            generate_button = st.button("Generate Strategy", type="primary", key="generate_button")
+        # Extract chunks and sources
+        chunks = []
+        sources = []
         
-        # Additional context section
-        col1, col2 = st.columns([1, 1])
+        # Extract chunk citations and source links if available
+        chunk_pattern = r"Chunk ID: ([A-Za-z0-9-]+)"
+        source_pattern = r"Source: \[(.*?)\]\((.*?)\)"
         
-        with col1:
-            st.markdown("### Market Context")
-            use_sales = st.checkbox("Include Sales Analysis", value=True)
-            use_trends = st.checkbox("Include Market Trends", value=True)
+        chunk_ids = re.findall(chunk_pattern, response_text)
+        sources = re.findall(source_pattern, response_text)
         
-        with col2:
-            st.markdown("### Business Context")
-            additional_context = st.text_area(
-                "Additional Business Context",
-                height=100,
-                placeholder="Add specific details about your product, target market, or business goals",
-                key="strategy_context"
-            )
+        # Get the referenced chunks directly from the result
+        if "chunk_ids" in result:
+            chunk_ids = result["chunk_ids"]
         
-        # Process strategy generation when button is clicked
-        if generate_button and product_type:
-            with st.spinner(f"Generating marketing strategy for {segment}..."):
-                # Fetch sales and market data
-                context_data = {}
-                
-                if use_sales:
-                    df = asyncio.run(get_sales_data(segment))
-                    if not df.empty:
-                        context_data["sales_analysis"] = {
-                            "total_revenue": df["revenue"].sum(),
-                            "avg_margin": df["estimated_margin_pct"].mean(),
-                            "top_products": df.groupby("product_name")["revenue"].sum().nlargest(3).to_dict(),
-                            "sales_trend": df.groupby("date")["revenue"].sum().to_dict()
-                        }
-                
-                if use_trends:
+        # Clean up the response text - remove the chunk IDs from the main report
+        clean_response = response_text
+        if chunk_ids:
+            # Remove the chunk ID lines and any "References" section at the end
+            clean_response = re.sub(r"\n+## References\s*\n+Chunk ID: [A-Za-z0-9-]+(\n+Chunk ID: [A-Za-z0-9-]+)*", "", response_text)
+            clean_response = re.sub(r"\nSource \d+: [A-Za-z0-9_-]+", "", clean_response)
+            clean_response = re.sub(r"\nChunk ID: [A-Za-z0-9-]+", "", clean_response)
+        
+        # Format the report with professional styling
+        st.markdown("## Marketing Knowledge Report")
+        st.markdown("---")
+        st.markdown(clean_response)
+        
+        # Try to get the actual chunks content
+        chunk_contents = []
+        try:
+            # Get chunks from the query result if available
+            if 'last_query_result' in st.session_state and isinstance(st.session_state['last_query_result'], dict):
+                query_result = st.session_state['last_query_result']
+                if "chunks" in query_result:
+                    chunks = query_result.get("chunks", [])
+                    for chunk in chunks:
+                        if isinstance(chunk, dict) and "content" in chunk:
+                            chunk_contents.append({
+                                "id": chunk.get("chunk_id", "unknown"),
+                                "content": chunk.get("content", "No content available")
+                            })
+        except NameError:
+            # If query_result is not defined, try to fetch chunks again
+            try:
+                # Create a direct connection to get the chunks
+                from agents.custom_mcp_client import MCPClient
+                market_analysis_client = MCPClient("market_analysis")
+                for chunk_id in chunk_ids:
                     try:
-                        # Convert async call to sync using asyncio.run
-                        trends = asyncio.run(unified_agent.mcp_client.invoke(
-                            "get_market_trends",
-                            {"segment": segment}
-                        ))
-                        context_data["market_trends"] = trends
-                    except Exception as e:
-                        st.warning(f"Could not fetch market trends: {str(e)}")
-                
-                # Add business context
-                if additional_context:
-                    context_data["business_context"] = additional_context
-                
-                strategy_query = (
-                    f"Generate a marketing strategy for {product_type} in the {segment} "
-                    f"as a {competitive_position}. Use the generate_segment_strategy tool "
-                    f"with segment_name='{segment}', product_type='{product_type}', "
-                    f"and competitive_position='{competitive_position}'."
-                )
-                
-                try:
-                    # Execute strategy generation asynchronously
-                    result = asyncio.run(process_marketing_query(
-                        strategy_query,
-                        segment,
-                        use_context=True,
-                        context_data=context_data
-                    ))
-                    
-                    if result and result.get("status") == "success":
-                        st.session_state['strategy_result'] = result
-                        st.success("Strategy generated successfully!")
-                    else:
-                        st.error("Strategy generation failed. Please try again with different parameters.")
-                except Exception as e:
-                    st.error(f"Error generating strategy: {str(e)}")
+                        chunk_content = market_analysis_client.invoke_sync(
+                            "fetch_s3_chunk",
+                            {"chunk_id": chunk_id}
+                        )
+                        if chunk_content and not isinstance(chunk_content, str):
+                            chunk_contents.append({"id": chunk_id, "content": str(chunk_content)})
+                        elif chunk_content:
+                            chunk_contents.append({"id": chunk_id, "content": chunk_content})
+                    except Exception as chunk_error:
+                        st.warning(f"Could not fetch content for chunk {chunk_id}: {str(chunk_error)}")
+            except Exception as e:
+                st.warning(f"Could not fetch chunk contents: {str(e)}")
         
-        # Display strategy results
-        if 'strategy_result' in st.session_state and st.session_state['strategy_result']:
-            result = st.session_state['strategy_result']
-            response_text = result.get("response", "")
+        # Move source information to an expandable section at the bottom
+        with st.expander("View Source Information"):
+            st.markdown("### Referenced Sources")
             
-            st.markdown("### Marketing Strategy")
-            
-            # Check if there are sections to display
-            sections = response_text.split("##")
-            if len(sections > 1):
-                # Display executive summary first
-                st.markdown(sections[0])
-                
-                # Create tabs for other sections
-                section_titles = [s.split("\n")[0].strip() for s in sections[1:]]
-                section_tabs = st.tabs(section_titles)
-                
-                for tab, content in zip(section_tabs, sections[1:]):
-                    with tab:
-                        st.markdown(f"##{content}")
+            # Display chunks with their content if available
+            if chunk_contents:
+                for i, chunk_data in enumerate(chunk_contents):
+                    st.markdown(f"**Source {i+1}:** {chunk_data['id']}")
+                    st.text_area(
+                        f"Content from {chunk_data['id']}", 
+                        value=chunk_data['content'],
+                        height=200,
+                        disabled=True,
+                        key=f"source_content_{i}"
+                    )
+                    st.markdown("---")  # Add a separator between sources
+            elif chunk_ids:
+                for i, chunk_id in enumerate(chunk_ids):
+                    st.markdown(f"**Source {i+1}:** {chunk_id}")
             else:
-                st.markdown(response_text)
-            
-            # Download strategy as text or PDF
-            col1, col2 = st.columns(2)
-            with col1:
-                st.download_button(
-                    label="Download Strategy (Text)",
-                    data=response_text,
-                    file_name=f"{segment}_marketing_strategy.txt",
-                    mime="text/plain",
-                    key="download_strategy_text"
-                )
-            with col2:
-                st.download_button(
-                    label="Download Strategy (PDF)",
-                    data=response_text,
-                    file_name=f"{segment}_marketing_strategy.pdf",
-                    mime="application/pdf",
-                    key="download_strategy_pdf"
-                )
+                st.markdown("No specific sources referenced.")
+                
+            if sources:
+                st.markdown("### Related Materials")
+                for title, url in sources:
+                    st.markdown(f"- [{title}]({url})")
+
+
 
 # Call the main function
 show()

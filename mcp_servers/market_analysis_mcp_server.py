@@ -10,7 +10,6 @@ RAG with Philip Kotler's Marketing Management book
 """
 import json
 import boto3
-from openai import OpenAI
 import logging
 from fastapi import FastAPI, Request, Body
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,11 +23,20 @@ from pydantic import BaseModel
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("market_analysis_mcp_server")
 
+# Handle OpenAI import - try both new and old style
+try:
+    # Try new OpenAI API (v1.0.0+)
+    from openai import OpenAI
+    logger.info("Using new OpenAI API style (v1.0.0+)")
+    has_new_openai = True
+except ImportError:
+    # Fall back to old OpenAI API
+    import openai
+    logger.info("Using old OpenAI API style (pre-v1.0.0)")
+    has_new_openai = False
+    
 # Import configuration
 from config.config import Config
-
-
-
 
 # Get the OpenAI API key directly from environment variable
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -42,8 +50,15 @@ if OPENAI_API_KEY:
     logger.info(f"Using OpenAI API key: {masked_key}")
 else:
     logger.error("No OpenAI API key found! API calls will fail.")
+    
 # Initialize OpenAI client with explicit API key
-openai_client = OpenAI(api_key=OPENAI_API_KEY)
+if has_new_openai:
+    # New API style
+    openai_client = OpenAI(api_key=OPENAI_API_KEY)
+else:
+    # Old API style
+    openai.api_key = OPENAI_API_KEY
+    openai_client = openai
 
 # Create FastAPI app
 app = FastAPI(title="Market Analysis MCP Server")
@@ -68,7 +83,6 @@ rag_state = {
     "analysis_results": {}
 }
 
-# Core Search & Retrieval Tools
 @traceable(name="pinecone_search")
 @mcp_server.tool()
 def pinecone_search(query: str, top_k: int = 3) -> Union[List[str], Dict[str, str]]:
@@ -76,12 +90,25 @@ def pinecone_search(query: str, top_k: int = 3) -> Union[List[str], Dict[str, st
     try:
         logger.info(f"Searching Pinecone for: {query}")
         
-        # Get embeddings for the query
-        response = openai_client.embeddings.create(
-            model="text-embedding-ada-002",
-            input=[query]
-        )
-        query_embedding = response.data[0].embedding
+        # Get embeddings for the query - handle both old and new OpenAI API styles
+        try:
+            if has_new_openai:
+                # New API style
+                response = openai_client.embeddings.create(
+                    model="text-embedding-ada-002",
+                    input=[query]
+                )
+                query_embedding = response.data[0].embedding
+            else:
+                # Old API style
+                response = openai_client.Embedding.create(
+                    model="text-embedding-ada-002",
+                    input=[query]
+                )
+                query_embedding = response["data"][0]["embedding"]
+        except Exception as embed_error:
+            logger.error(f"Error creating embeddings: {str(embed_error)}")
+            return ["No relevant chunks found. Please try a different query."]
         
         # Use updated Pinecone import
         from pinecone import Pinecone
@@ -96,13 +123,39 @@ def pinecone_search(query: str, top_k: int = 3) -> Union[List[str], Dict[str, st
         # Get the index (assuming it already exists)
         index = pc.Index(index_name)
         
-        # Search Pinecone - use the "book-kotler" namespace
-        results = index.query(
-            vector=query_embedding,
-            top_k=top_k,
-            include_metadata=True,
-            namespace="book-kotler"
-        )
+        # Try different namespaces - often "book-kotler" might not be available in all environments
+        namespaces_to_try = ["book-kotler", "kotler", "marketing"]
+        results = None
+        
+        for namespace in namespaces_to_try:
+            try:
+                logger.info(f"Trying namespace: {namespace}")
+                # Search Pinecone with the current namespace
+                results = index.query(
+                    vector=query_embedding,
+                    top_k=top_k,
+                    include_metadata=True,
+                    namespace=namespace
+                )
+                
+                if results and results.matches and len(results.matches) > 0:
+                    logger.info(f"Found {len(results.matches)} matches in namespace {namespace}")
+                    break
+            except Exception as ns_error:
+                logger.warning(f"Error with namespace {namespace}: {str(ns_error)}")
+                continue
+        
+        # If all namespaces failed, try without namespace
+        if not results or not results.matches or len(results.matches) == 0:
+            try:
+                logger.info("Trying without namespace")
+                results = index.query(
+                    vector=query_embedding,
+                    top_k=top_k,
+                    include_metadata=True
+                )
+            except Exception as e:
+                logger.warning(f"Error querying without namespace: {str(e)}")
         
         # Update state
         rag_state["last_query"] = query
@@ -362,12 +415,26 @@ async def direct_query_marketing_content(query: str, top_k: int = 3):
     try:
         logger.info(f"Query marketing content for: {query}")
         
-        # Get embeddings for the query using OpenAI (1536 dimensions)
-        response = openai_client.embeddings.create(
-            model="text-embedding-ada-002",
-            input=[query]
-        )
-        query_embedding = response.data[0].embedding
+        # Get embeddings for the query - handle both OpenAI API styles
+        query_embedding = None
+        try:
+            if has_new_openai:
+                # New API style
+                response = openai_client.embeddings.create(
+                    model="text-embedding-ada-002",
+                    input=[query]
+                )
+                query_embedding = response.data[0].embedding
+            else:
+                # Old API style
+                response = openai_client.Embedding.create(
+                    model="text-embedding-ada-002",
+                    input=[query]
+                )
+                query_embedding = response["data"][0]["embedding"]
+        except Exception as embed_error:
+            logger.error(f"Error creating embeddings: {str(embed_error)}")
+            return {"status": "error", "message": "Error with embedding creation. Please try again."}
         
         # Use updated Pinecone import
         from pinecone import Pinecone
@@ -381,16 +448,39 @@ async def direct_query_marketing_content(query: str, top_k: int = 3):
         # Get the index
         index = pc.Index(index_name)
         
-        # Search Pinecone using "book-kotler" namespace - the only namespace available based on the dashboard
-        results = index.query(
-            vector=query_embedding,
-            top_k=top_k,
-            include_metadata=True,
-            namespace="book-kotler"
-        )
+        # Search Pinecone - try multiple namespaces
+        namespaces_to_try = ["book-kotler", "kotler", "marketing", None] # None for default namespace
+        results = None
+        
+        for namespace in namespaces_to_try:
+            try:
+                namespace_str = namespace if namespace else "default"
+                logger.info(f"Trying namespace: {namespace_str}")
+                
+                # If namespace is None, don't include it in the query
+                if namespace is None:
+                    results = index.query(
+                        vector=query_embedding,
+                        top_k=top_k,
+                        include_metadata=True
+                    )
+                else:
+                    results = index.query(
+                        vector=query_embedding,
+                        top_k=top_k,
+                        include_metadata=True,
+                        namespace=namespace
+                    )
+                
+                if results and hasattr(results, 'matches') and len(results.matches) > 0:
+                    logger.info(f"Found {len(results.matches)} matches in namespace {namespace_str}")
+                    break
+            except Exception as ns_error:
+                logger.warning(f"Error with namespace {namespace_str}: {str(ns_error)}")
+                continue
         
         # Check if we have results
-        if not results.matches or len(results.matches) == 0:
+        if not results or not hasattr(results, 'matches') or len(results.matches) == 0:
             logger.warning(f"No marketing content found for query: {query}")
             return {
                 "status": "error",
@@ -467,7 +557,7 @@ async def simple_marketing_query(query: str, top_k: int = 5):
         
     except Exception as e:
         logger.error(f"Error in simple marketing query: {str(e)}")
-        return {"status": "error", "message": f"Server error: {str(e)}"}
+        return {"status": "error", "message": f"Server error: {str(e)}"}  
 
 # Add health check endpoint
 @app.get("/health")

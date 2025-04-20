@@ -579,8 +579,6 @@ if 'sales_data' in st.session_state and st.session_state['sales_data'] is not No
                         else:
                             # Snowflake upload failed but we already have local storage
                             st.session_state['snowflake_uploaded'] = True  # Still enable analysis with local data
-                            st.warning(f"Note: Snowflake upload attempt failed: {result['message']}")
-                            st.info("Proceeding with local data analysis instead.")
                     except Exception as e:
                         # Snowflake upload exception but we already have local storage
                         st.session_state['snowflake_uploaded'] = True  # Still enable analysis with local data

@@ -7,11 +7,11 @@ from requests.exceptions import RequestException
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from PIL import Image
-
-st.set_page_config(page_title="Grok AI Poster Generator", layout="centered")
+ 
+st.set_page_config(page_title="REDDIT SHPOIFY", layout="centered")
 st.title("🧠 Grok AI Product Poster Generator")
 st.markdown("Generate photorealistic e-commerce product posters using **Grok (xAI)**.")
-
+ 
 @st.cache_resource
 def get_session():
     session = requests.Session()
@@ -24,7 +24,7 @@ def get_session():
     session.mount('http://', adapter)
     session.mount('https://', adapter)
     return session
-
+ 
 # Add before the form
 def check_server():
     try:
@@ -32,19 +32,19 @@ def check_server():
         return response.ok
     except:
         return False
-
+ 
 # === Form Inputs === #
 with st.form("generate_form"):
     title = st.text_input("🛍️ Product Title", placeholder="Enter product name", max_chars=100)
-
+ 
     # Add after title
     if not check_server():
         st.error("⚠️ MCP Server is not running. Please start the server first.")
         st.stop()
-
+ 
     description = st.text_area("📝 Product Description", placeholder="Write a compelling product description")
     submitted = st.form_submit_button("🚀 Generate Poster")
-
+ 
 # === POST to MCP Server === #
 if submitted:
     if not title or not description:
@@ -61,11 +61,9 @@ if submitted:
                     "title": title,
                     "description": description,
                 }
-                
                 # Show request details in debug mode
                 if st.checkbox("Debug Mode"):
                     st.code(f"Request URL: {url}\nPayload: {json.dumps(payload, indent=2)}")
-                
                 session = get_session()
                 response = session.post(
                     url=url,
@@ -73,21 +71,18 @@ if submitted:
                     headers=headers,
                     timeout=60
                 )
-                
                 # Check status code first
                 response.raise_for_status()
-                
                 try:
                     result = response.json()
                 except json.JSONDecodeError as e:
                     st.error(f"Invalid JSON response: {response.text}")
                     st.error(f"JSON Error: {str(e)}")
                     st.stop()
-
+ 
                 # Update the image processing section
                 if result.get("status") == "success":
                     st.success("Poster generated successfully!")
-                    
                     image_url = result.get("imageUrl")
                     if image_url:
                         try:
@@ -96,7 +91,7 @@ if submitted:
                                 st.error("Received placeholder image data from server")
                                 st.info("Please check server implementation - actual base64 image data required")
                                 st.stop()
-
+ 
                             # Show detailed debug info
                             with st.expander("🔍 Debug Image Data"):
                                 st.code(f"""
@@ -104,19 +99,18 @@ if submitted:
                                 First 50 chars: {image_url[:50]}
                                 Is base64 prefix present: {"base64," in image_url}
                                 """)
-
+ 
                             # Extract and validate base64 data
                             if "base64," in image_url:
                                 base64_data = image_url.split("base64,")[1].strip()
                             else:
                                 base64_data = image_url.strip()
-
+ 
                             if not base64_data or base64_data == "...":
                                 raise ValueError("Invalid or empty base64 data received from server")
-
+ 
                             # Decode and process image
                             image_bytes = base64.b64decode(base64_data)
-                            
                             # Show binary data debug info
                             with st.expander("🔍 Binary Data Info"):
                                 st.code(f"""
@@ -124,21 +118,18 @@ if submitted:
                                 First 16 bytes: {image_bytes[:16].hex()}
                                 PNG signature match: {image_bytes.startswith(b'\x89PNG\r\n\x1a\n')}
                                 """)
-
+ 
                             # Create image buffer and verify format
                             buf = BytesIO(image_bytes)
                             try:
                                 with Image.open(buf) as img:
                                     # Show image details
                                     st.info(f"Image format: {img.format}, Size: {img.size}, Mode: {img.mode}")
-                                    
                                     # Convert if needed
                                     if img.mode in ('RGBA', 'LA'):
                                         img = img.convert('RGB')
-                                    
                                     # Display image
                                     st.image(img, caption=title, use_column_width=True)
-                                    
                                     # Reset buffer and add download
                                     buf.seek(0)
                                     st.download_button(
@@ -150,7 +141,6 @@ if submitted:
                             except Exception as img_error:
                                 st.error(f"Image format error: {str(img_error)}")
                                 st.warning("Make sure the server is returning a valid PNG image in base64 format")
-                                
                         except Exception as e:
                             st.error(f"Image processing failed: {str(e)}")
                             if st.checkbox("Show Technical Details"):
@@ -160,20 +150,19 @@ if submitted:
                                 """)
                     else:
                         st.error("No image URL in server response")
-                        
                     # Add after displaying the image and download button
                     if result.get("redditUrl"):
                         st.success("✅ Posted to Reddit!")
                         st.markdown(f"""
                         🔗 **Reddit Post**: [View on Reddit]({result["redditUrl"]})
                         """)
-
+ 
                     if result.get("shopifyUrl"):
                         st.success("✅ Added to Shopify Store!")
                         st.markdown(f"""
                         🛍️ **Product Page**: [View in Store]({result["shopifyUrl"]})
                         """)
-
+ 
                     # Add social sharing buttons
                     st.markdown("### 📢 Share")
                     col1, col2 = st.columns(2)
@@ -191,7 +180,7 @@ if submitted:
                                 result["shopifyUrl"],
                                 help="View the product in Shopify store"
                             )
-
+ 
                     # Move the metadata expander after the sharing buttons
                     with st.expander("📊 Generation Details"):
                         if result.get("redditUrl"):
@@ -204,7 +193,7 @@ if submitted:
                 else:
                     st.error(f"Error: {result.get('message', 'Unknown error')}")
                     st.json(result)  # Show full error response
-
+ 
             except RequestException as e:
                 st.error(f"⚠️ Network Error: {str(e)}")
                 if hasattr(e, 'response') and e.response is not None:
