@@ -1,18 +1,19 @@
 version: '3.8'
-
+ 
+# Common configuration for Airflow services
 x-airflow-common:
   &airflow-common
-  image: airflow-custom:latest  # Use the custom image instead of apache/airflow
+  image: ${AIRFLOW_IMAGE:-airflow-custom:latest}  # Use the custom image from CI/CD or build locally
   build:
     context: .
-    dockerfile: ./Airflow/Dockerfile   
+    dockerfile: ./Airflow/Dockerfile  
   environment:
     &airflow-common-env
     AIRFLOW__CORE__EXECUTOR: CeleryExecutor
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
     AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@postgres/airflow
     AIRFLOW__CELERY__BROKER_URL: redis://:@redis:6379/0
-    AIRFLOW__CORE__FERNET_KEY: 'XrG08Cq6vp4c2n2vMVGy_VYOoDAhk6TbhHzoBAAV7iM='  # Replace with actual key
+    AIRFLOW__CORE__FERNET_KEY: 'XrG08Cq6vp4c2n2vMVGy_VYOoDAhk6TbhHzoBAAV7iM='
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
     AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
     AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session'
@@ -22,10 +23,9 @@ x-airflow-common:
     - ./Airflow/logs:/opt/airflow/logs
     - ./Airflow/config:/opt/airflow/config
     - ./Airflow/plugins:/opt/airflow/plugins
-    - ./.env:/opt/airflow/.env 
+    - ./.env:/opt/airflow/.env
     - ./Backend:/opt/airflow/Backend
     - ./source-books:/opt/airflow/source-books
-    
   networks:
     - app-network
   user: "${AIRFLOW_UID:-50000}:0"
@@ -34,9 +34,49 @@ x-airflow-common:
       condition: service_healthy
     postgres:
       condition: service_healthy
-
+ 
 services:
-  
+  # MCP Server services
+  mcp-server:
+    image: ${IMAGE:-marketscope:latest}  # Use the image from CI/CD or build locally
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    container_name: mcp-server
+    env_file:
+      - ./.env copy
+    restart: always
+    ports:
+      - "8000:8000"  # Unified Server
+      - "8001:8001"  # Market Analysis
+      - "8002:8002"  # Sales Analytics
+      - "8003:8003"  # Legacy Segment
+      - "8004:8004"  # Snowflake
+      - "8005:8005"  # Other potential ports
+      - "8006:8006"
+      - "8007:8007"
+      - "8008:8008"
+      - "8009:8009"
+      - "8010:8010"
+      - "8011:8011"
+      - "8012:8012"
+      - "8013:8013"
+      - "8014:8014"
+      - "8015:8015"
+      - "8016:8016"  # Reddit & Shopify
+    volumes:
+      - ./data:/app/data
+      - ./.env:/app/.env
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+ 
+  # Airflow services
   postgres:
     image: postgres:13
     container_name: airflow-postgres
@@ -54,7 +94,7 @@ services:
       retries: 5
       start_period: 5s
     restart: always
-
+ 
   redis:
     image: redis:7.2-bookworm
     container_name: airflow-redis
@@ -69,7 +109,7 @@ services:
     restart: always
     networks:
       - app-network
-
+ 
   airflow-webserver:
     <<: *airflow-common
     container_name: airflow-webserver
@@ -86,7 +126,7 @@ services:
     depends_on:
       airflow-init:
         condition: service_completed_successfully
-
+ 
   airflow-scheduler:
     <<: *airflow-common
     container_name: airflow-scheduler
@@ -101,7 +141,7 @@ services:
     depends_on:
       airflow-init:
         condition: service_completed_successfully
-
+ 
   airflow-worker:
     <<: *airflow-common
     container_name: airflow-worker
@@ -110,7 +150,7 @@ services:
     depends_on:
       airflow-init:
         condition: service_completed_successfully
-
+ 
   airflow-triggerer:
     <<: *airflow-common
     container_name: airflow-triggerer
@@ -119,7 +159,7 @@ services:
     depends_on:
       airflow-init:
         condition: service_completed_successfully
-
+ 
   airflow-init:
     <<: *airflow-common
     container_name: airflow-init
@@ -128,7 +168,7 @@ services:
       - -c
       - |
         echo "Initializing Airflow DB..."
-        airflow db upgrade  # Ensures database is properly migrated
+        airflow db upgrade
         airflow users create \
           --username admin \
           --password admin \
@@ -144,11 +184,11 @@ services:
     environment:
       <<: *airflow-common-env
       _AIRFLOW_DB_MIGRATE: 'true'
-    user: "${AIRFLOW_UID:-50000}:0"  # Run as airflow user
-    restart: on-failure  # Prevents infinite restart loop
+    user: "${AIRFLOW_UID:-50000}:0"
+    restart: on-failure
     volumes:
       - ./Airflow:/sources
-
+ 
   airflow-cli:
     <<: *airflow-common
     container_name: airflow-cli
@@ -161,10 +201,10 @@ services:
       - bash
       - -c
       - airflow
-
+ 
 volumes:
   postgres-db-volume:
-
+ 
 networks:
   app-network:
     driver: bridge

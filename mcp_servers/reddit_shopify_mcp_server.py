@@ -261,7 +261,7 @@ async def test_connection():
         "status": "connected",
         "server": "grok_mcp",
         "timestamp": datetime.now().isoformat(),
-        "port": 8011
+        "port": 8016
     }
 
 class GenerateRequest(BaseModel):
@@ -317,4 +317,4 @@ async def generate_image(request: GenerateRequest):
 
 # Run app if needed directly
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8011)
+    uvicorn.run(app, host="0.0.0.0", port=8016)

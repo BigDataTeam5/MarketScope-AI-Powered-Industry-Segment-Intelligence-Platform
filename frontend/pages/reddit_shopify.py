@@ -28,7 +28,7 @@ def get_session():
 # Add before the form
 def check_server():
     try:
-        response = requests.get("http://localhost:8011/health", timeout=5)
+        response = requests.get("http://localhost:8016/health", timeout=5)
         return response.ok
     except:
         return False
@@ -52,7 +52,7 @@ if submitted:
     else:
         with st.spinner("Generating image using Grok..."):
             try:
-                url = "http://localhost:8011/generate"  # Updated endpoint
+                url = "http://localhost:8016/generate"  # Updated endpoint
                 headers = {
                     "Content-Type": "application/json",
                     "Accept": "application/json"
@@ -61,9 +61,11 @@ if submitted:
                     "title": title,
                     "description": description,
                 }
+               
                 # Show request details in debug mode
                 if st.checkbox("Debug Mode"):
                     st.code(f"Request URL: {url}\nPayload: {json.dumps(payload, indent=2)}")
+               
                 session = get_session()
                 response = session.post(
                     url=url,
@@ -71,8 +73,10 @@ if submitted:
                     headers=headers,
                     timeout=60
                 )
+               
                 # Check status code first
                 response.raise_for_status()
+               
                 try:
                     result = response.json()
                 except json.JSONDecodeError as e:
@@ -83,6 +87,7 @@ if submitted:
                 # Update the image processing section
                 if result.get("status") == "success":
                     st.success("Poster generated successfully!")
+                   
                     image_url = result.get("imageUrl")
                     if image_url:
                         try:
@@ -111,13 +116,16 @@ if submitted:
  
                             # Decode and process image
                             image_bytes = base64.b64decode(base64_data)
+                           
                             # Show binary data debug info
                             with st.expander("🔍 Binary Data Info"):
-                                st.code(f"""
-                                Bytes length: {len(image_bytes)}
-                                First 16 bytes: {image_bytes[:16].hex()}
-                                PNG signature match: {image_bytes.startswith(b'\x89PNG\r\n\x1a\n')}
-                                """)
+                                PNG_SIGNATURE = bytes([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
+                                debug_info = (
+                                    f"Bytes length: {len(image_bytes)}\n"
+                                    f"First 16 bytes: {image_bytes[:16].hex()}\n"
+                                    f"PNG signature match: {image_bytes.startswith(PNG_SIGNATURE)}"
+                                )
+                                st.code(debug_info)
  
                             # Create image buffer and verify format
                             buf = BytesIO(image_bytes)
@@ -125,11 +133,14 @@ if submitted:
                                 with Image.open(buf) as img:
                                     # Show image details
                                     st.info(f"Image format: {img.format}, Size: {img.size}, Mode: {img.mode}")
+                                   
                                     # Convert if needed
                                     if img.mode in ('RGBA', 'LA'):
                                         img = img.convert('RGB')
+                                   
                                     # Display image
                                     st.image(img, caption=title, use_column_width=True)
+                                   
                                     # Reset buffer and add download
                                     buf.seek(0)
                                     st.download_button(
@@ -141,6 +152,7 @@ if submitted:
                             except Exception as img_error:
                                 st.error(f"Image format error: {str(img_error)}")
                                 st.warning("Make sure the server is returning a valid PNG image in base64 format")
+                               
                         except Exception as e:
                             st.error(f"Image processing failed: {str(e)}")
                             if st.checkbox("Show Technical Details"):
@@ -150,6 +162,7 @@ if submitted:
                                 """)
                     else:
                         st.error("No image URL in server response")
+                       
                     # Add after displaying the image and download button
                     if result.get("redditUrl"):
                         st.success("✅ Posted to Reddit!")
