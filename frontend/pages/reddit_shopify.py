@@ -28,7 +28,7 @@ def get_session():
 # Add before the form
 def check_server():
     try:
-        response = requests.get("http://localhost:8016/health", timeout=5)
+        response = requests.get("http://34.172.249.210:8016/health", timeout=5)
         return response.ok
     except:
         return False
@@ -52,7 +52,7 @@ if submitted:
     else:
         with st.spinner("Generating image using Grok..."):
             try:
-                url = "http://localhost:8016/generate"  # Updated endpoint
+                url = "http://34.172.249.210:8016/generate"  # Updated endpoint
                 headers = {
                     "Content-Type": "application/json",
                     "Accept": "application/json"

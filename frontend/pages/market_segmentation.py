@@ -77,7 +77,7 @@ def get_mcp_server_url(segment_name):
         print(f"Available segments: {Config.SEGMENT_CONFIG.keys() if hasattr(Config, 'SEGMENT_CONFIG') else 'None'}")
    
     # Map segment names to server URLs
-    return f"http://localhost:{port}"
+    return f"http://34.172.249.210:{port}"
  
 st.set_page_config(layout="wide")
  

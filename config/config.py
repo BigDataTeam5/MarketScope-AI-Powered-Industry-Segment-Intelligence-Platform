@@ -114,8 +114,6 @@ class Config:
         "Healthcare - Diagnostic": {"port": 8015, "namespace": "diagnostics"},
         "Pharmaceutical": {"port": 8005, "namespace": "otc-pharmaceutical"},
         "Supplements": {"port": 8006, "namespace": "supplements"},
-        "Segment Analysis": {"port": 8007, "namespace": "segment-analysis"},
-        "Segment Study Reports": {"port": 8008, "namespace": "segment-study-reports"},
         "Wearables": {"port": 8009, "namespace": "wearables"}
     }
 

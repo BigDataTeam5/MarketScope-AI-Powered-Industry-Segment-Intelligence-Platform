@@ -14,7 +14,7 @@ st.title("MarketScope Connection Test")
 # Test specific endpoints
 st.header("Test Direct Connections")
 
-server_url = st.text_input("Server URL", "http://localhost:8014")
+server_url = st.text_input("Server URL", "http://34.172.249.210:8014")
 endpoint = st.text_input("Endpoint", "/health")
 
 if st.button("Test Connection"):
