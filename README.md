@@ -17,7 +17,7 @@ MarketScope AI is an intelligent analytics platform that helps you understand an
 - Required packages (installed automatically when following the setup instructions)
 
 ### Setup and Running
-![diagram-export-4-18-2025-2_51_50-PM](https://github.com/user-attachments/assets/6f26c242-6cfc-4f3a-9d49-d6fafab3aa03)
+![alt text](diagram-architecture.png)
 
 #### Simple Method
 Run the simplified starter script:
