@@ -108,3 +108,6 @@ https://codelabs-preview.appspot.com/?file_id=1_936snjPYvoj-RmfO5Vcm2G8xzjVTv0XG
 ## License
 
 [MIT License](LICENSE)
+## This is MCP  server is certified by MCPHub 
+https://mcphub.com/mcp-servers/bigdatateam5/marketscope-ai-powered-industry-segment-intelligence-platform/
+
